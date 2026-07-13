@@ -1,0 +1,237 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+html {
+  background: #e8ece7;
+}
+
+body {
+  margin: 0;
+  background: #f7f8f6;
+  color: #0f172a;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.app-shell {
+  width: min(100vw, 1180px);
+  height: 100dvh;
+  min-height: 100dvh;
+  margin: 0 auto;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+.app-header {
+  padding-top: max(1.5rem, env(safe-area-inset-top));
+}
+
+.app-content {
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable both-edges;
+}
+
+.bottom-nav {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  z-index: 8;
+}
+
+.assistant-fab {
+  right: max(1rem, env(safe-area-inset-right)) !important;
+}
+
+.toast {
+  max-width: calc(100% - 2rem);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.txn-table-wrap {
+  width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-backdrop {
+  padding-top: env(safe-area-inset-top);
+}
+
+.modal-panel {
+  max-height: min(92dvh, 760px) !important;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.modal-scroll {
+  overscroll-behavior: contain;
+}
+
+.modal-footer {
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+}
+
+.invoice-shell {
+  min-height: 100dvh;
+}
+
+.invoice-card,
+.invoice-toolbar {
+  max-width: min(100%, 560px) !important;
+}
+
+@media (min-width: 700px) {
+  body {
+    background:
+      linear-gradient(90deg, rgba(33, 84, 100, 0.08), transparent 18%, transparent 82%, rgba(107, 79, 160, 0.08)),
+      #e8ece7;
+  }
+
+  .app-shell {
+    width: min(100vw, 1120px);
+    min-height: 100dvh;
+  }
+
+  .app-header {
+    padding-left: clamp(1.5rem, 4vw, 3rem);
+    padding-right: clamp(1.5rem, 4vw, 3rem);
+    border-bottom-left-radius: 1.25rem;
+    border-bottom-right-radius: 1.25rem;
+  }
+
+  .app-content {
+    padding: clamp(1.25rem, 3vw, 2rem);
+    padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+  }
+
+  .responsive-stat-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .status-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .party-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .stat-card {
+    min-height: 92px;
+  }
+
+  .bottom-nav {
+    left: 50%;
+    right: auto;
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    width: min(520px, calc(100% - 2rem));
+    transform: translateX(-50%);
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
+  }
+
+  .assistant-fab {
+    bottom: calc(6.25rem + env(safe-area-inset-bottom)) !important;
+  }
+
+  .toast {
+    bottom: calc(6.5rem + env(safe-area-inset-bottom));
+  }
+
+  .modal-backdrop {
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+
+  .modal-panel {
+    width: min(620px, 100%);
+    border-radius: 1rem;
+    max-height: min(86dvh, 760px) !important;
+    box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+  }
+
+  .invoice-shell {
+    padding: clamp(1.5rem, 4vw, 3rem);
+  }
+}
+
+@media (min-width: 1000px) {
+  .app-shell {
+    border-left: 1px solid rgba(15, 23, 42, 0.08);
+    border-right: 1px solid rgba(15, 23, 42, 0.08);
+  }
+
+  .app-content > div,
+  .app-content > .txn-table-wrap {
+    max-width: 1040px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .party-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .app-header {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .app-content {
+    padding-top: 0.75rem;
+    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+  }
+
+  .bottom-nav {
+    padding-top: 0.35rem;
+    padding-bottom: max(0.35rem, env(safe-area-inset-bottom));
+  }
+
+  .bottom-nav span {
+    display: none;
+  }
+
+  .assistant-fab {
+    width: 3rem;
+    height: 3rem;
+    bottom: calc(4.25rem + env(safe-area-inset-bottom)) !important;
+  }
+
+  .modal-panel {
+    max-height: calc(100dvh - 1rem) !important;
+  }
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+
+  .app-shell,
+  .invoice-shell {
+    width: 100%;
+    min-height: auto;
+    box-shadow: none;
+    overflow: visible;
+  }
+}

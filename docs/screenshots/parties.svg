@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200">
+  <rect width="900" height="1200" fill="#f7f8f6"/>
+  <rect width="900" height="120" rx="24" fill="#215464"/>
+  <text x="64" y="58" font-family="Arial" font-size="28" font-weight="700" fill="white">Milk Ledger</text>
+  <text x="64" y="86" font-family="Arial" font-size="16" fill="#c9dbe0">Parties and balances</text>
+  <rect x="36" y="156" width="828" height="54" rx="12" fill="#e8edf3"/>
+  <rect x="40" y="160" width="410" height="46" rx="10" fill="white"/>
+  <text x="190" y="190" font-family="Arial" font-size="16" font-weight="700" fill="#215464">Purchase Suppliers</text>
+  <text x="570" y="190" font-family="Arial" font-size="16" font-weight="700" fill="#64748b">Sale Customers</text>
+  <rect x="36" y="236" width="760" height="54" rx="12" fill="white" stroke="#dfe7ef"/>
+  <text x="74" y="270" font-family="Arial" font-size="18" fill="#94a3b8">Search supplier...</text>
+  <rect x="810" y="236" width="54" height="54" rx="12" fill="#215464"/>
+  <text x="828" y="274" font-family="Arial" font-size="34" fill="white">+</text>
+  <g font-family="Arial">
+    <rect x="36" y="324" width="392" height="92" rx="12" fill="white" stroke="#dfe7ef"/>
+    <text x="58" y="356" font-size="18" font-weight="700" fill="#1e293b">Ramesh Yadav</text>
+    <text x="58" y="382" font-size="13" fill="#94a3b8">98765 43210</text>
+    <text x="58" y="406" font-size="14" font-weight="700" fill="#b3391f">₹3,156.80 due</text>
+    <rect x="472" y="324" width="392" height="92" rx="12" fill="white" stroke="#dfe7ef"/>
+    <text x="494" y="356" font-size="18" font-weight="700" fill="#1e293b">Suresh Patil</text>
+    <text x="494" y="382" font-size="13" fill="#94a3b8">99881 21605</text>
+    <text x="494" y="406" font-size="14" font-weight="700" fill="#b3391f">₹2,718.52 due</text>
+    <rect x="36" y="444" width="392" height="92" rx="12" fill="white" stroke="#dfe7ef"/>
+    <text x="58" y="476" font-size="18" font-weight="700" fill="#1e293b">Mahesh Chandra</text>
+    <text x="58" y="502" font-size="13" fill="#94a3b8">99465 14211</text>
+    <text x="58" y="526" font-size="14" font-weight="700" fill="#b3391f">₹800.24 due</text>
+    <rect x="472" y="444" width="392" height="92" rx="12" fill="white" stroke="#dfe7ef"/>
+    <text x="494" y="476" font-size="18" font-weight="700" fill="#1e293b">Dinesh Kumar</text>
+    <text x="494" y="502" font-size="13" fill="#94a3b8">99521 99964</text>
+    <text x="494" y="526" font-size="14" font-weight="700" fill="#b3391f">₹1,859.56 due</text>
+  </g>
+  <rect x="246" y="1070" width="408" height="70" rx="35" fill="white" stroke="#dfe7ef"/>
+  <text x="292" y="1112" font-family="Arial" font-size="14" fill="#94a3b8">Dashboard</text>
+  <text x="426" y="1112" font-family="Arial" font-size="14" font-weight="700" fill="#215464">Parties</text>
+  <text x="538" y="1112" font-family="Arial" font-size="14" fill="#94a3b8">Account</text>
+</svg>

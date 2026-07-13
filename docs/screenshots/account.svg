@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200">
+  <rect width="900" height="1200" fill="#f7f8f6"/>
+  <rect width="900" height="120" rx="24" fill="#215464"/>
+  <text x="64" y="58" font-family="Arial" font-size="28" font-weight="700" fill="white">Milk Ledger</text>
+  <text x="64" y="86" font-family="Arial" font-size="16" fill="#c9dbe0">Account, backup and profile settings</text>
+  <rect x="36" y="156" width="828" height="350" rx="14" fill="white" stroke="#dfe7ef"/>
+  <text x="58" y="196" font-family="Arial" font-size="15" font-weight="700" fill="#8da0b8">BUSINESS PROFILE</text>
+  <text x="58" y="244" font-family="Arial" font-size="14" font-weight="700" fill="#8da0b8">BUSINESS NAME</text>
+  <rect x="58" y="264" width="784" height="54" rx="10" fill="white" stroke="#dfe7ef"/>
+  <text x="78" y="300" font-family="Arial" font-size="20" fill="#1e293b">Radhey-Shyam Durgalaya</text>
+  <text x="58" y="356" font-family="Arial" font-size="14" font-weight="700" fill="#8da0b8">PHONE</text>
+  <rect x="58" y="376" width="370" height="54" rx="10" fill="white" stroke="#dfe7ef"/>
+  <text x="78" y="412" font-family="Arial" font-size="18" fill="#1e293b">98765 43210</text>
+  <text x="472" y="356" font-family="Arial" font-size="14" font-weight="700" fill="#8da0b8">LANGUAGE</text>
+  <rect x="472" y="376" width="370" height="54" rx="10" fill="#6b4fa0"/>
+  <text x="618" y="412" font-family="Arial" font-size="18" font-weight="700" fill="white">English</text>
+  <rect x="58" y="450" width="784" height="36" rx="8" fill="#215464"/>
+  <text x="380" y="474" font-family="Arial" font-size="14" font-weight="700" fill="white">Save Business Profile</text>
+  <rect x="36" y="536" width="828" height="220" rx="14" fill="white" stroke="#dfe7ef"/>
+  <text x="58" y="576" font-family="Arial" font-size="15" font-weight="700" fill="#8da0b8">BACKUPS</text>
+  <rect x="58" y="608" width="240" height="48" rx="10" fill="#f1f5f9"/>
+  <rect x="330" y="608" width="240" height="48" rx="10" fill="#f1f5f9"/>
+  <rect x="602" y="608" width="240" height="48" rx="10" fill="#f1f5f9"/>
+  <text x="150" y="638" font-family="Arial" font-size="16" font-weight="700" fill="#475569">Local</text>
+  <text x="414" y="638" font-family="Arial" font-size="16" font-weight="700" fill="#475569">GDrive</text>
+  <text x="678" y="638" font-family="Arial" font-size="16" font-weight="700" fill="#475569">OneDrive</text>
+  <text x="58" y="698" font-family="Arial" font-size="14" font-weight="700" fill="#8da0b8">AUTO BACKUP</text>
+  <rect x="58" y="718" width="250" height="48" rx="10" fill="#215464"/>
+  <text x="166" y="748" font-family="Arial" font-size="16" font-weight="700" fill="white">Every entry</text>
+  <rect x="36" y="790" width="828" height="240" rx="14" fill="white" stroke="#dfe7ef"/>
+  <text x="58" y="830" font-family="Arial" font-size="15" font-weight="700" fill="#8da0b8">SECURITY &amp; ACTIVITY</text>
+  <rect x="58" y="862" width="240" height="48" rx="10" fill="#334155"/>
+  <text x="144" y="892" font-family="Arial" font-size="16" font-weight="700" fill="white">PIN/JWT</text>
+  <rect x="330" y="862" width="240" height="48" rx="10" fill="#f1f5f9"/>
+  <text x="402" y="892" font-family="Arial" font-size="16" font-weight="700" fill="#475569">Fingerprint</text>
+  <text x="58" y="952" font-family="Arial" font-size="14" font-weight="700" fill="#1e293b">Transaction added</text>
+  <text x="58" y="978" font-family="Arial" font-size="13" fill="#64748b">Ramesh Yadav ₹284.28 · 13 Jul 2026 12:29 PM</text>
+  <rect x="246" y="1070" width="408" height="70" rx="35" fill="white" stroke="#dfe7ef"/>
+  <text x="292" y="1112" font-family="Arial" font-size="14" fill="#94a3b8">Dashboard</text>
+  <text x="426" y="1112" font-family="Arial" font-size="14" fill="#94a3b8">Parties</text>
+  <text x="538" y="1112" font-family="Arial" font-size="14" font-weight="700" fill="#215464">Account</text>
+</svg>

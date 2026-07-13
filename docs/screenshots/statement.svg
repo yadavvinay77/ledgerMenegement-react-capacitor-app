@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="850" viewBox="0 0 1200 850">
+  <rect width="1200" height="850" fill="#ffffff"/>
+  <rect width="1200" height="126" fill="#0f172a"/>
+  <rect y="120" width="1200" height="6" fill="#215464"/>
+  <text x="48" y="52" font-family="Arial" font-size="34" font-weight="700" fill="white">Milk Ledger</text>
+  <text x="48" y="82" font-family="Arial" font-size="16" fill="#cbd5e1">Dairy purchase and sales account statement</text>
+  <text x="1030" y="52" text-anchor="end" font-family="Arial" font-size="28" font-weight="700" fill="white">ACCOUNT STATEMENT</text>
+  <text x="1030" y="82" text-anchor="end" font-family="Arial" font-size="16" fill="#cbd5e1">Period: 01 Jul 2026 to 08 Jul 2026</text>
+  <rect x="48" y="166" width="1104" height="116" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="68" y="196" font-family="Arial" font-size="13" font-weight="700" fill="#64748b">BUSINESS PROFILE</text>
+  <text x="620" y="196" font-family="Arial" font-size="13" font-weight="700" fill="#64748b">CUSTOMER PROFILE</text>
+  <text x="68" y="232" font-family="Arial" font-size="24" font-weight="700" fill="#0f172a">Radhey-Shyam Durgalaya</text>
+  <text x="620" y="232" font-family="Arial" font-size="24" font-weight="700" fill="#0f172a">Ramesh Yadav</text>
+  <text x="68" y="260" font-family="Arial" font-size="14" fill="#475569">Near market road, Anand</text>
+  <text x="620" y="260" font-family="Arial" font-size="14" fill="#475569">Phone: 98765 43210 · Type: Purchase Supplier</text>
+  <g font-family="Arial">
+    <rect x="48" y="310" width="205" height="72" fill="white" stroke="#e2e8f0"/>
+    <text x="64" y="334" font-size="12" font-weight="700" fill="#64748b">OPENING</text>
+    <text x="64" y="362" font-size="22" font-weight="700" fill="#0f172a">₹335</text>
+    <rect x="269" y="310" width="205" height="72" fill="white" stroke="#e2e8f0"/>
+    <text x="285" y="334" font-size="12" font-weight="700" fill="#64748b">PAID</text>
+    <text x="285" y="362" font-size="22" font-weight="700" fill="#1b7a5e">₹1,995.50</text>
+    <rect x="490" y="310" width="205" height="72" fill="white" stroke="#e2e8f0"/>
+    <text x="506" y="334" font-size="12" font-weight="700" fill="#64748b">CREDIT</text>
+    <text x="506" y="362" font-size="22" font-weight="700" fill="#a1690a">₹558.72</text>
+    <rect x="711" y="310" width="205" height="72" fill="white" stroke="#e2e8f0"/>
+    <text x="727" y="334" font-size="12" font-weight="700" fill="#64748b">DEBIT</text>
+    <text x="727" y="362" font-size="22" font-weight="700" fill="#b3391f">₹1,565</text>
+    <rect x="932" y="310" width="220" height="72" fill="white" stroke="#e2e8f0"/>
+    <text x="948" y="334" font-size="12" font-weight="700" fill="#64748b">CLOSING</text>
+    <text x="948" y="362" font-size="22" font-weight="700" fill="#215464">₹-671.28</text>
+  </g>
+  <rect x="48" y="420" width="1104" height="34" fill="#f1f5f9"/>
+  <text x="64" y="443" font-family="Arial" font-size="12" font-weight="700" fill="#475569">DATE</text>
+  <text x="178" y="443" font-family="Arial" font-size="12" font-weight="700" fill="#475569">PARTICULARS</text>
+  <text x="500" y="443" font-family="Arial" font-size="12" font-weight="700" fill="#475569">UNITS</text>
+  <text x="730" y="443" font-family="Arial" font-size="12" font-weight="700" fill="#475569">PAID</text>
+  <text x="842" y="443" font-family="Arial" font-size="12" font-weight="700" fill="#475569">CREDIT</text>
+  <text x="956" y="443" font-family="Arial" font-size="12" font-weight="700" fill="#475569">DEBIT</text>
+  <text x="1080" y="443" font-family="Arial" font-size="12" font-weight="700" fill="#475569">BALANCE</text>
+  <g font-family="Arial" font-size="14" fill="#334155">
+    <text x="64" y="486">03 Jul</text><text x="178" y="486">Fresh Cow - Evening</text><text x="500" y="486">9.7 L x ₹200</text><text x="730" y="486">-</text><text x="842" y="486">₹558.72</text><text x="956" y="486">-</text><text x="1080" y="486" font-weight="700">₹893.72</text>
+    <text x="64" y="526">04 Jul</text><text x="178" y="526">Kachcha Goat - Morning</text><text x="500" y="526">7.4 L x ₹200</text><text x="730" y="526">-</text><text x="842" y="526">-</text><text x="956" y="526">₹467.68</text><text x="1080" y="526" font-weight="700">₹426.04</text>
+    <text x="64" y="566">04 Jul</text><text x="178" y="566">Fresh Cow - Evening</text><text x="500" y="566">8.1 L x ₹200</text><text x="730" y="566">-</text><text x="842" y="566">-</text><text x="956" y="566">₹469.80</text><text x="1080" y="566" font-weight="700">₹-43.76</text>
+  </g>
+  <rect x="48" y="596" width="1104" height="38" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="64" y="621" font-family="Arial" font-size="13" font-weight="700" fill="#0f172a">TOTAL</text>
+  <text x="178" y="621" font-family="Arial" font-size="13" font-weight="700" fill="#0f172a">All transactions</text>
+  <text x="500" y="621" font-family="Arial" font-size="13" font-weight="700" fill="#0f172a">25.2 L / ₹4,119.22</text>
+  <text x="730" y="621" font-family="Arial" font-size="13" font-weight="700" fill="#1b7a5e">₹1,995.50</text>
+  <text x="842" y="621" font-family="Arial" font-size="13" font-weight="700" fill="#a1690a">₹558.72</text>
+  <text x="956" y="621" font-family="Arial" font-size="13" font-weight="700" fill="#b3391f">₹1,565</text>
+  <text x="1080" y="621" font-family="Arial" font-size="13" font-weight="700" fill="#0f172a">₹-671.28</text>
+  <rect x="48" y="680" width="1104" height="98" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="64" y="710" font-family="Arial" font-size="16" font-weight="700" fill="#0f172a">Detailed Notes</text>
+  <text x="64" y="738" font-family="Arial" font-size="14" fill="#475569">Paid entries are settled immediately and do not change the closing balance.</text>
+  <text x="64" y="762" font-family="Arial" font-size="14" fill="#475569">Closing Balance = Opening Balance + Credit - Debit/Udhaar.</text>
+</svg>

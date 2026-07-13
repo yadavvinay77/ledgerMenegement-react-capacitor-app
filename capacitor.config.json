@@ -1,0 +1,5 @@
+{
+  "appId": "com.milkledger.app",
+  "appName": "Milk Ledger",
+  "webDir": "dist"
+}

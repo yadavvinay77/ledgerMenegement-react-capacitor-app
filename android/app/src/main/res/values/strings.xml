@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Milk Ledger</string>
+    <string name="title_activity_main">Milk Ledger</string>
+    <string name="package_name">com.milkledger.app</string>
+    <string name="custom_url_scheme">com.milkledger.app</string>
+</resources>
