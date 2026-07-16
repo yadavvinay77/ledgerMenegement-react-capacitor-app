@@ -37,6 +37,7 @@ const normalizeSampleWeight = (raw) => {
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const toISODate = (d) => { const tz = d.getTimezoneOffset() * 60000; return new Date(d - tz).toISOString().slice(0, 10); };
+const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const STATUS_META = {
   paid: { label: "Paid", color: "#1b7a5e", bg: "#e6f4ef" },
@@ -1438,6 +1439,12 @@ export default function MilkLedger() {
   const parseDateRangeFromText = (text) => {
     const q = text.toLowerCase();
     const now = new Date();
+    if (/\btoday\b/.test(q)) return { from: todayStr(), to: todayStr() };
+    if (/\byesterday\b/.test(q)) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      const iso = toISODate(d);
+      return { from: iso, to: iso };
+    }
     if (/\bthis month\b/.test(q)) return monthRange(now.getFullYear(), now.getMonth());
     if (/\blast month\b/.test(q)) {
       const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -1450,10 +1457,106 @@ export default function MilkLedger() {
     return null;
   };
 
-  const STATEMENT_KEYWORDS = /\b(statement|transactions?|history|ledger|entries|records?)\b/i;
+  const parseDateFromText = (text) => {
+    const q = text.toLowerCase();
+    const now = new Date();
+    if (/\byesterday\b/.test(q)) return toISODate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+    const numeric = q.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+    if (numeric) {
+      const day = parseInt(numeric[1], 10);
+      const month = parseInt(numeric[2], 10) - 1;
+      const year = numeric[3] ? parseInt(numeric[3].length === 2 ? `20${numeric[3]}` : numeric[3], 10) : now.getFullYear();
+      return toISODate(new Date(year, month, day));
+    }
+    for (let i = 0; i < MONTH_NAMES.length; i++) {
+      const m = q.match(new RegExp(`\\b(\\d{1,2})\\s+${MONTH_NAMES[i]}(?:\\s+(\\d{4}))?\\b`));
+      if (m) return toISODate(new Date(m[2] ? parseInt(m[2], 10) : now.getFullYear(), i, parseInt(m[1], 10)));
+    }
+    return todayStr();
+  };
+
+  const findMentionedCustomer = (text, flowHint) => {
+    const lower = text.toLowerCase();
+    let pool = customers;
+    if (flowHint) pool = pool.filter((c) => c.flow === flowHint);
+    const direct = pool
+      .filter((c) => new RegExp(`\\b${escapeRegExp(c.name.toLowerCase())}\\b`).test(lower))
+      .sort((a, b) => b.name.length - a.name.length);
+    if (direct.length) return { customerName: direct[0].name, matches: direct };
+
+    const nameMatch = lower.match(/\b(?:for|from|to|of)\s+([a-z][a-z\s.]{1,40}?)(?:\s+(?:for|from|to|of|today|yesterday|on|about|with|and|paid|credit|udhaar|udhar|debit|sample|rate|rs|rupees|statement|transaction|milk|buffalo|cow|goat)\b|$)/i);
+    if (!nameMatch) return { customerName: null, matches: [] };
+    const guess = nameMatch[1].replace(/\b(milk|transaction|statement|ledger|month)\b/g, "").trim();
+    return { customerName: guess, matches: findCustomerMatches(guess, flowHint) };
+  };
+
+  const parseLocalTransaction = (text) => {
+    const q = text.toLowerCase();
+    const hasLogVerb = /\b(add|log|record|save|create|enter|bought|buy|purchase|purchased|sold|sell|sale|received|paid|payment|jama|udhaar|udhar|debit|credit|transaction)\b/.test(q);
+    if (!hasLogVerb) return null;
+
+    const flow = /\b(sold|sell|sale|customer|to)\b/.test(q) && !/\b(bought|buy|purchase|supplier|from)\b/.test(q) ? "sale" : "purchase";
+    const mentioned = findMentionedCustomer(text, flow);
+    const fallbackMentioned = mentioned.matches.length ? mentioned : findMentionedCustomer(text);
+    const customerName = mentioned.customerName || fallbackMentioned.customerName;
+    if (!customerName && !/\b(amount|payment|paid|received)\b/.test(q)) return null;
+
+    const isMoney = /\b(payment|paid|received|jama|settle|settlement|cash|amount only)\b/.test(q) && !/\b(l|ltr|liter|litre|kg|milk|buffalo|cow|goat|ghee|curd|khoya|topla)\b/.test(q);
+    const qtyMatch = q.match(/\b(?:about\s*)?(\d+(?:\.\d+)?)\s*(?:l|ltr|liter|litre|liters|litres|kg|pcs?|piece)?\b/);
+    const sampleMatch = q.match(/\b(?:sample(?:\s+weight)?|fat|weight)\s*(?:of\s*)?(\d+(?:\.\d+)?)\s*(?:g|gram|grams|kg)?\b/) || q.match(/\b(\d{2,4})\s*(?:g|gram|grams)\b/);
+    const rateMatch = q.match(/\b(?:rate|@|rs|₹|rupees?)\s*(?:of\s*)?(\d+(?:\.\d+)?)\b/);
+    const amountMatch = q.match(/\b(?:amount|payment|paid|received|rs|₹|rupees?)\s*(?:of\s*)?(\d+(?:\.\d+)?)\b/);
+
+    const type = /\bbuffalo\b/.test(q) ? "Buffalo" : /\bcow\b/.test(q) ? "Cow" : /\bgoat\b/.test(q) ? "Goat" : "Buffalo";
+    const category = /\bkachcha|kacha|raw\b/.test(q) ? "Kachcha" : "Fresh";
+    const shift = /\bevening|pm\b/.test(q) ? "Evening" : "Morning";
+    const status = /\b(udhaar|udhar|debit|due|borrow)\b/.test(q) ? "debit" : /\bcredit\b/.test(q) ? "credit" : "paid";
+    const saleItem = SALE_ITEMS.find((item) => q.includes(item.label.toLowerCase()) || item.label.toLowerCase().split(" - ").every((part) => q.includes(part)));
+
+    if (isMoney) {
+      return {
+        intent: "log_transaction",
+        flow: fallbackMentioned.matches[0]?.flow || flow,
+        kind: "money",
+        customerName,
+        date: parseDateFromText(text),
+        amount: amountMatch ? parseFloat(amountMatch[1]) : qtyMatch ? parseFloat(qtyMatch[1]) : null,
+        status: /\b(udhaar|udhar|debit|due)\b/.test(q) ? "debit" : "credit",
+        note: text,
+      };
+    }
+
+    const kind = flow === "sale" ? "item" : "milk";
+    const itemKey = flow === "sale" ? (saleItem?.key || `milk_${type.toLowerCase()}`) : null;
+    const defaultRate = kind === "item"
+      ? rates.saleItems?.[itemKey] ?? SALE_ITEMS.find((i) => i.key === itemKey)?.defaultRate
+      : rates.purchaseMatrix?.[category]?.[type] ?? rates.purchase;
+
+    return {
+      intent: "log_transaction",
+      flow: fallbackMentioned.matches[0]?.flow || flow,
+      kind,
+      customerName,
+      date: parseDateFromText(text),
+      shift,
+      category,
+      type,
+      itemKey,
+      itemName: itemKey === "other" ? "Other" : null,
+      qty: qtyMatch ? parseFloat(qtyMatch[1]) : null,
+      sampleWeight: kind === "milk" ? (sampleMatch ? parseFloat(sampleMatch[1]) : null) : null,
+      rate: rateMatch ? parseFloat(rateMatch[1]) : defaultRate,
+      amount: null,
+      status,
+      note: text,
+    };
+  };
+
+  const STATEMENT_KEYWORDS = /\b(statement|history|ledger|records?|account)\b/i;
 
   const tryStatementIntent = (text) => {
     if (!STATEMENT_KEYWORDS.test(text)) return null;
+    if (/\b(add|log|record|save|create|enter|new)\b.*\b(transaction|entry)\b/i.test(text)) return null;
     const lower = text.toLowerCase();
     const matches = customers.filter((c) => lower.includes(c.name.toLowerCase()));
     return { matches, range: parseDateRangeFromText(text) };
@@ -1550,9 +1653,18 @@ Sentence: "${text}"`;
     setChatMessages((m) => [...m, { role: "user", text }]);
     setChatInput("");
 
+    const localParsed = parseLocalTransaction(text);
+    if (localParsed?.intent === "log_transaction") {
+      const draft = buildDraftFromParsed(localParsed);
+      setChatMessages((m) => [...m, { role: "confirm", draft }]);
+      return;
+    }
+
     const stmt = tryStatementIntent(text);
     if (stmt) {
       if (stmt.matches.length === 1) {
+        const rangeLabel = stmt.range ? `${fmtDate(stmt.range.from)} to ${fmtDate(stmt.range.to)}` : "full history";
+        setChatMessages((m) => [...m, { role: "assistant", text: `Opening ${stmt.matches[0].name}'s statement for ${rangeLabel}.` }]);
         openPartyStatement(stmt.matches[0], stmt.range);
         return;
       }
@@ -2995,6 +3107,13 @@ function DraftConfirmCard({ draft, customers, onPickCustomer, onChange, onConfir
       ? round2((parseFloat(draft.qty) || 0) * (parseFloat(draft.rate) || 0))
       : round2((parseFloat(draft.qty) || 0) * normalizeSampleWeight(draft.sampleWeight) * (parseFloat(draft.rate) || 0));
   const statusOptions = draft.kind === "money" ? ["credit", "debit"] : ["paid", "credit", "debit"];
+  const canSave = !!customer && (
+    draft.kind === "money"
+      ? parseFloat(draft.amount) > 0
+      : draft.kind === "milk"
+      ? parseFloat(draft.qty) > 0 && parseFloat(draft.rate) > 0 && normalizeSampleWeight(draft.sampleWeight) > 0
+      : parseFloat(draft.qty) > 0 && parseFloat(draft.rate) > 0
+  );
 
   return (
     <div className="self-start w-full max-w-full bg-white border border-slate-200 rounded-2xl p-3.5">
@@ -3035,7 +3154,7 @@ function DraftConfirmCard({ draft, customers, onPickCustomer, onChange, onConfir
       </div>
 
       {draft.kind !== "money" ? (
-        <div className="grid grid-cols-2 gap-2 mb-2">
+        <div className={`grid gap-2 mb-2 ${draft.kind === "milk" ? "grid-cols-3" : "grid-cols-2"}`}>
           <input
             type="number"
             inputMode="decimal"
@@ -3044,6 +3163,16 @@ function DraftConfirmCard({ draft, customers, onPickCustomer, onChange, onConfir
             placeholder="Qty"
             className="border border-slate-200 rounded-lg px-2.5 py-2 text-sm outline-none"
           />
+          {draft.kind === "milk" && (
+            <input
+              type="number"
+              inputMode="decimal"
+              value={draft.sampleWeight}
+              onChange={(e) => onChange({ sampleWeight: e.target.value })}
+              placeholder="Sample g"
+              className="border border-slate-200 rounded-lg px-2.5 py-2 text-sm outline-none"
+            />
+          )}
           <input
             type="number"
             inputMode="decimal"
@@ -3084,7 +3213,7 @@ function DraftConfirmCard({ draft, customers, onPickCustomer, onChange, onConfir
 
       <button
         onClick={onConfirm}
-        disabled={!customer}
+        disabled={!canSave}
         className="w-full py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-40"
         style={{ background: flowMeta.color }}
       >

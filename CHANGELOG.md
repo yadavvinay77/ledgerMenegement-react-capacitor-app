@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.2
+
+- Fixed Assistant intent ordering so "add/log transaction" commands are parsed as transaction drafts instead of being treated as statement navigation.
+- Added offline natural-language parsing for common milk ledger commands, including party names, milk type, quantity, sample weight, rate, paid/credit/udhaar status, and simple dates.
+- Improved statement commands so the assistant opens the requested party statement with the parsed date range.
+- Added sample-weight editing and safer validation to the assistant confirmation card before saving.
+
 ## v0.2.1
 
 - Reworked the app shell to use the full mobile/tablet viewport instead of a fixed phone-width frame.
