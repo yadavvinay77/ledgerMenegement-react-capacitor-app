@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.2
+
+- Updated simple-interest loan methodology so deposits reduce the active interest base and added principal increases it for future monthly rows.
+- Added an Add Principal action in loan accounts for top-up lending entries.
+- Added borrower and loan delete actions with confirmation dialogs.
+- Added full loan statement sharing in PDF and JPG, alongside CSV/text, with business profile, borrower profile, loan terms, summary cards, and full ledger rows.
+- Expanded loan CSV statements with business/borrower profile details and settlement summary fields.
+
 ## v0.3.1
 
 - Updated loan ledgers to auto-display every monthly interest row from the loan start date through today.

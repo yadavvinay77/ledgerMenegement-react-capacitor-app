@@ -210,10 +210,16 @@ const buildLoanLedgerRows = (loan, asOf = todayStr()) => {
       if (loan.interestType === "compound") {
         compoundBalance = round2(Math.max(0, compoundBalance - amount));
       } else {
-        const toInterest = Math.min(interestDue, amount);
-        interestDue = round2(interestDue - toInterest);
-        principal = round2(Math.max(0, principal - (amount - toInterest)));
+        const toPrincipal = Math.min(principal, amount);
+        principal = round2(principal - toPrincipal);
+        interestDue = round2(Math.max(0, interestDue - (amount - toPrincipal)));
       }
+    }
+
+    if (event.type === "principal_add") {
+      label = "Added Principal";
+      if (loan.interestType === "compound") compoundBalance = round2(compoundBalance + amount);
+      else principal = round2(principal + amount);
     }
 
     if (event.type === "settlement") {
@@ -304,7 +310,8 @@ export default function MilkLedger() {
   const [lendingSearch, setLendingSearch] = useState("");
   const [viewingBorrower, setViewingBorrower] = useState(null);
   const [viewingLoan, setViewingLoan] = useState(null);
-  const [lendingDialog, setLendingDialog] = useState(null); // borrower | loan | deposit | interest | settle
+  const [lendingDialog, setLendingDialog] = useState(null); // borrower | loan | deposit | principal | interest | settle
+  const [lendingDeleteTarget, setLendingDeleteTarget] = useState(null);
   const [showAssistant, setShowAssistant] = useState(false);
   const [showSeedConfirm, setShowSeedConfirm] = useState(false);
 
@@ -583,6 +590,16 @@ export default function MilkLedger() {
     logActivity("lending", `Deposit ₹${amount} for ${borrowerById(viewingLoan.borrowerId)?.name || "borrower"}`);
   };
 
+  const savePrincipalAdd = async (draft) => {
+    if (!viewingLoan) return;
+    const amount = round2(parseFloat(draft.amount) || 0);
+    if (amount <= 0) return;
+    await addLoanEntry(viewingLoan.id, { type: "principal_add", date: draft.date || todayStr(), amount, note: draft.note || "Additional principal given" });
+    setLendingDialog(null);
+    showToast("Principal added");
+    logActivity("lending", `Added principal Rs ${amount} for ${borrowerById(viewingLoan.borrowerId)?.name || "borrower"}`);
+  };
+
   const postLoanInterest = async (draft) => {
     if (!viewingLoan) return;
     const amount = round2(parseFloat(draft.amount) || 0);
@@ -601,6 +618,30 @@ export default function MilkLedger() {
     setLendingDialog(null);
     showToast("Loan settled");
     logActivity("lending", `Settled loan for ${borrowerById(viewingLoan.borrowerId)?.name || "borrower"} at ₹${amount}`);
+  };
+
+  const deleteBorrower = async (borrowerId) => {
+    const borrower = borrowerById(borrowerId);
+    const nextBorrowers = borrowers.filter((b) => b.id !== borrowerId);
+    const nextLoans = loans.filter((loan) => loan.borrowerId !== borrowerId);
+    await persist.borrowers(nextBorrowers);
+    await persist.loans(nextLoans);
+    setViewingBorrower(null);
+    setViewingLoan(null);
+    setLendingDeleteTarget(null);
+    showToast("Borrower deleted");
+    logActivity("lending", `Deleted borrower ${borrower?.name || "profile"} and related loans`);
+  };
+
+  const deleteLoan = async (loanId) => {
+    const loan = loans.find((item) => item.id === loanId);
+    const borrowerName = borrowerById(loan?.borrowerId)?.name || "borrower";
+    const next = loans.filter((item) => item.id !== loanId);
+    await persist.loans(next);
+    setViewingLoan(null);
+    setLendingDeleteTarget(null);
+    showToast("Loan deleted");
+    logActivity("lending", `Deleted loan for ${borrowerName}`);
   };
 
   const openBorrower = (borrower) => {
@@ -1633,12 +1674,22 @@ export default function MilkLedger() {
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const lines = [
+      ["Business", businessProfile.businessName || "Milk Ledger"].map(esc).join(","),
+      ["Business Phone", businessProfile.phone || ""].map(esc).join(","),
+      ["Business Address", businessProfile.address || ""].map(esc).join(","),
+      "",
       ["Borrower", borrower?.name || "Unknown"].map(esc).join(","),
       ["Phone", borrower?.phone || ""].map(esc).join(","),
+      ["Address", borrower?.address || ""].map(esc).join(","),
+      ["ID/Reference", borrower?.idRef || ""].map(esc).join(","),
       ["Loan Start", loan.startDate].map(esc).join(","),
       ["Interest Type", loan.interestType].map(esc).join(","),
       ["Monthly Rate", `${loan.rate}%`].map(esc).join(","),
+      ["Opening Principal", round2(loan.principal)].map(esc).join(","),
+      ["Active Principal/Base", round2(state.principal)].map(esc).join(","),
+      ["Next Interest", round2(state.projectedInterest)].map(esc).join(","),
       ["Current Balance", round2(state.totalBalance)].map(esc).join(","),
+      ["Settlement Today", round2(state.settlementAmount)].map(esc).join(","),
       "",
       ["Date", "Type", "Amount", "Balance", "Note"].join(","),
       ...[...(state.ledgerRows || [])].map((row) => [
@@ -1673,6 +1724,195 @@ export default function MilkLedger() {
       rows.length > 12 ? `Full CSV statement includes ${rows.length} rows.` : null,
     ].filter(Boolean).join("\n");
     shareAsText(`${borrower?.name || "Borrower"} Loan Statement`, text);
+  };
+
+  const loanStatementName = (loan) => {
+    const borrower = borrowerById(loan.borrowerId);
+    return `${(borrower?.name || "borrower").replace(/[^\w-]+/g, "_")}_loan_statement_${todayStr()}`;
+  };
+
+  const shareLoanStatementPdf = async (loan) => {
+    const borrower = borrowerById(loan.borrowerId);
+    const state = calculateLoanState(loan);
+    const rows = state.ledgerRows || [];
+    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 30;
+    const money = (value) => `Rs ${round2(value || 0)}`;
+    const businessName = businessProfile.businessName || "Milk Ledger";
+
+    const text = (value, x, y, opts = {}) => {
+      doc.setFont("helvetica", opts.bold ? "bold" : "normal");
+      doc.setFontSize(opts.size || 9);
+      doc.setTextColor(opts.color || "#334155");
+      doc.text(String(value ?? "-"), x, y);
+    };
+    const box = (x, y, w, h, title, lines = []) => {
+      doc.setDrawColor("#e2e8f0");
+      doc.setFillColor("#f8fafc");
+      doc.rect(x, y, w, h, "FD");
+      text(title, x + 12, y + 20, { bold: true, color: "#64748b", size: 8 });
+      lines.forEach((line, i) => text(line, x + 12, y + 40 + i * 16, { bold: i === 0, size: i === 0 ? 13 : 9, color: i === 0 ? "#0f172a" : "#475569" }));
+    };
+    const drawHeader = () => {
+      doc.setFillColor("#0f172a");
+      doc.rect(0, 0, pageW, 90, "F");
+      text(businessName, margin, 34, { bold: true, size: 22, color: "#ffffff" });
+      text("Loan account statement", margin, 55, { size: 10, color: "#dbe4ee" });
+      text(businessProfile.address || "Business address not set", margin, 71, { size: 9, color: "#dbe4ee" });
+      text("LOAN STATEMENT", pageW - margin - 180, 36, { bold: true, size: 18, color: "#ffffff" });
+      text(`Generated: ${fmtDate(todayStr())}`, pageW - margin - 140, 60, { size: 10, color: "#dbe4ee" });
+      doc.setDrawColor("#215464");
+      doc.setLineWidth(5);
+      doc.line(0, 90, pageW, 90);
+    };
+
+    drawHeader();
+    let y = 118;
+    box(margin, y, (pageW - margin * 2 - 12) / 2, 82, "BUSINESS PROFILE", [
+      businessName,
+      `Owner: ${businessProfile.ownerName || "Not set"}`,
+      `Phone: ${businessProfile.phone || "Not set"}`,
+      `Reg/Ref: ${businessProfile.regNo || "Not set"}`,
+    ]);
+    box(pageW / 2 + 6, y, (pageW - margin * 2 - 12) / 2, 82, "BORROWER PROFILE", [
+      borrower?.name || "Unknown",
+      `Phone: ${borrower?.phone || "Not set"}`,
+      `Address: ${borrower?.address || "Not set"}`,
+      `ID/Ref: ${borrower?.idRef || "Not set"}`,
+    ]);
+    y += 105;
+
+    const cards = [
+      ["Opening Principal", money(loan.principal)],
+      ["Active Principal", money(state.principal)],
+      ["Current Balance", money(state.totalBalance)],
+      ["Next Interest", money(state.projectedInterest)],
+      ["Settlement Today", money(state.settlementAmount)],
+    ];
+    const cardW = (pageW - margin * 2 - 32) / 5;
+    cards.forEach(([label, value], i) => box(margin + i * (cardW + 8), y, cardW, 58, label.toUpperCase(), [value]));
+    y += 82;
+
+    const profileLines = [
+      `Start: ${fmtDate(loan.startDate)}   Type: ${loan.interestType === "compound" ? "Compound" : "Simple"}   Rate: ${loan.rate}% monthly   Duration: ${loan.durationMonths || "Open"}`,
+      `Guarantor: ${loan.guarantorName || "Not set"} ${loan.guarantorPhone ? `(${loan.guarantorPhone})` : ""}`,
+      `Guarantee/Collateral: ${loan.collateral || "Not set"}`,
+      `Notes: ${loan.notes || "None"}`,
+    ];
+    box(margin, y, pageW - margin * 2, 72, "LOAN TERMS", profileLines);
+    y += 100;
+
+    const cols = [["Date", 82], ["Type", 122], ["Amount", 86], ["Balance", 92], ["Note", 410]];
+    const widths = cols.map(([, w]) => w);
+    const xs = widths.reduce((list, w, i) => {
+      list.push(i === 0 ? margin : list[i - 1] + widths[i - 1]);
+      return list;
+    }, []);
+    const drawCols = () => {
+      doc.setFillColor("#f1f5f9");
+      doc.rect(margin, y - 14, pageW - margin * 2, 24, "F");
+      cols.forEach(([label], i) => text(label, xs[i] + 4, y, { bold: true, color: "#475569" }));
+      y += 24;
+    };
+    drawCols();
+    rows.forEach((row) => {
+      if (y > pageH - 34) {
+        doc.addPage();
+        drawHeader();
+        y = 124;
+        drawCols();
+      }
+      const values = [fmtDate(row.date), row.label || row.type, money(row.amount), money(row.balance), row.note || "-"];
+      values.forEach((value, i) => {
+        const clipped = doc.splitTextToSize(String(value), widths[i] - 8)[0] || "";
+        text(clipped, xs[i] + 4, y, { bold: i === 2 || i === 3, color: i === 3 ? "#0f172a" : "#334155" });
+      });
+      y += 22;
+    });
+    await shareBlobAsFile(doc.output("blob"), `${loanStatementName(loan)}.pdf`, "Loan Statement PDF");
+  };
+
+  const shareLoanStatementImage = async (loan) => {
+    const borrower = borrowerById(loan.borrowerId);
+    const state = calculateLoanState(loan);
+    const rows = state.ledgerRows || [];
+    const scale = 2;
+    const width = 1280;
+    const rowH = 34;
+    const height = 360 + rows.length * rowH + 80;
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+    const money = (value) => `Rs ${round2(value || 0)}`;
+    const cell = (textValue, x, y, w, opts = {}) => {
+      ctx.fillStyle = opts.color || "#334155";
+      ctx.font = `${opts.bold ? "700" : "400"} ${opts.size || 16}px sans-serif`;
+      const value = String(textValue ?? "-");
+      const max = Math.max(5, Math.floor(w / ((opts.size || 16) * 0.55)));
+      ctx.fillText(value.length > max ? `${value.slice(0, max - 1)}...` : value, x, y);
+    };
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0, 0, width, 128);
+    cell(businessProfile.businessName || "Milk Ledger", 48, 48, 480, { bold: true, size: 34, color: "#ffffff" });
+    cell("Loan account statement", 48, 80, 420, { size: 18, color: "#dbe4ee" });
+    cell(`Generated: ${fmtDate(todayStr())}`, 930, 80, 260, { size: 18, color: "#dbe4ee" });
+    ctx.fillStyle = "#215464";
+    ctx.fillRect(0, 128, width, 8);
+
+    let y = 180;
+    const panel = (x, title, lines) => {
+      ctx.fillStyle = "#f8fafc";
+      ctx.strokeStyle = "#e2e8f0";
+      ctx.fillRect(x, y, 570, 106);
+      ctx.strokeRect(x, y, 570, 106);
+      cell(title, x + 20, y + 28, 260, { bold: true, size: 14, color: "#64748b" });
+      lines.forEach((line, i) => cell(line, x + 20, y + 58 + i * 22, 520, { bold: i === 0, size: i === 0 ? 22 : 15, color: i === 0 ? "#0f172a" : "#475569" }));
+    };
+    panel(48, "BUSINESS PROFILE", [businessProfile.businessName || "Milk Ledger", businessProfile.phone || "Phone not set", businessProfile.address || "Address not set"]);
+    panel(662, "BORROWER PROFILE", [borrower?.name || "Unknown", borrower?.phone || "Phone not set", borrower?.address || "Address not set"]);
+    y += 140;
+
+    const summary = [
+      ["Principal", money(loan.principal)],
+      ["Active Base", money(state.principal)],
+      ["Balance", money(state.totalBalance)],
+      ["Next Interest", money(state.projectedInterest)],
+      ["Settlement", money(state.settlementAmount)],
+    ];
+    summary.forEach(([label, value], i) => {
+      const x = 48 + i * 238;
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "#e2e8f0";
+      ctx.fillRect(x, y, 214, 76);
+      ctx.strokeRect(x, y, 214, 76);
+      cell(label.toUpperCase(), x + 14, y + 26, 170, { bold: true, size: 13, color: "#64748b" });
+      cell(value, x + 14, y + 56, 180, { bold: true, size: 24, color: "#0f172a" });
+    });
+    y += 116;
+
+    const columns = [["Date", 48, 125], ["Type", 178, 190], ["Amount", 378, 130], ["Balance", 520, 140], ["Note", 680, 520]];
+    ctx.fillStyle = "#f1f5f9";
+    ctx.fillRect(48, y - 24, 1184, 34);
+    columns.forEach(([label, x, w]) => cell(label, x, y, w, { bold: true, size: 15, color: "#475569" }));
+    y += 34;
+    rows.forEach((row) => {
+      ctx.strokeStyle = "#eef2f7";
+      ctx.beginPath();
+      ctx.moveTo(48, y + 8);
+      ctx.lineTo(1232, y + 8);
+      ctx.stroke();
+      const values = [fmtDate(row.date), row.label || row.type, money(row.amount), money(row.balance), row.note || "-"];
+      columns.forEach(([, x, w], i) => cell(values[i], x, y, w, { bold: i === 2 || i === 3, size: 15, color: i === 3 ? "#0f172a" : "#334155" }));
+      y += rowH;
+    });
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.95));
+    await shareBlobAsFile(blob, `${loanStatementName(loan)}.jpg`, "Loan Statement Image");
   };
 
   // ---------- Assistant: local answers (fast, no API, always accurate) ----------
@@ -2416,10 +2656,15 @@ Sentence: "${text}"`;
             onNewBorrower={() => setLendingDialog("borrower")}
             onNewLoan={() => setLendingDialog("loan")}
             onDeposit={() => setLendingDialog("deposit")}
+            onPrincipalAdd={() => setLendingDialog("principal")}
             onPostInterest={() => setLendingDialog("interest")}
             onSettle={() => setLendingDialog("settle")}
+            onDeleteBorrower={(borrower) => setLendingDeleteTarget({ type: "borrower", borrower })}
+            onDeleteLoan={(loan) => setLendingDeleteTarget({ type: "loan", loan })}
             onExportLoan={exportLoanStatementCSV}
             onShareLoan={shareLoanStatementText}
+            onShareLoanPdf={shareLoanStatementPdf}
+            onShareLoanImage={shareLoanStatementImage}
           />
         )}
 
@@ -3116,6 +3361,18 @@ Sentence: "${text}"`;
         />
       )}
 
+      {lendingDialog === "principal" && viewingLoan && (
+        <LoanAmountDialog
+          title="Add Principal"
+          defaultDate={todayStr()}
+          defaultAmount=""
+          defaultNote="Additional principal given"
+          actionLabel="Save Principal"
+          onClose={() => setLendingDialog(null)}
+          onSave={savePrincipalAdd}
+        />
+      )}
+
       {lendingDialog === "interest" && viewingLoan && (
         <LoanAmountDialog
           title="Post Interest"
@@ -3140,7 +3397,29 @@ Sentence: "${text}"`;
         />
       )}
 
-      {!showAssistant && !dialogCustomer && !showAddCustomer && !deleteTarget && !invoiceTxn && !showSeedConfirm && !shareSheet && !lendingDialog && (
+      {lendingDeleteTarget && (
+        <Modal title={lendingDeleteTarget.type === "borrower" ? "Delete Borrower?" : "Delete Loan?"} onClose={() => setLendingDeleteTarget(null)}>
+          <div className="text-sm text-slate-600">
+            {lendingDeleteTarget.type === "borrower"
+              ? "This will delete the borrower profile and all loan accounts under it."
+              : "This will delete this loan account and its full ledger."}
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-5">
+            <button onClick={() => setLendingDeleteTarget(null)} className="py-3 rounded-xl bg-slate-100 text-slate-600 text-sm font-semibold">
+              Cancel
+            </button>
+            <button
+              onClick={() => lendingDeleteTarget.type === "borrower" ? deleteBorrower(lendingDeleteTarget.borrower.id) : deleteLoan(lendingDeleteTarget.loan.id)}
+              className="py-3 rounded-xl text-white text-sm font-semibold"
+              style={{ background: STATUS_META.debit.color }}
+            >
+              Delete
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {!showAssistant && !dialogCustomer && !showAddCustomer && !deleteTarget && !lendingDeleteTarget && !invoiceTxn && !showSeedConfirm && !shareSheet && !lendingDialog && (
         <button
           onClick={() => { setShowAssistant(true); setAssistantView("chat"); }}
           className="assistant-fab absolute z-10 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white"
@@ -3268,8 +3547,8 @@ Sentence: "${text}"`;
 function LendingView({
   borrowers, loans, search, setSearch, viewingBorrower, viewingLoan,
   setViewingBorrower, setViewingLoan, openBorrower, borrowerById, loansForBorrower,
-  onNewBorrower, onNewLoan, onDeposit, onPostInterest, onSettle,
-  onExportLoan, onShareLoan,
+  onNewBorrower, onNewLoan, onDeposit, onPrincipalAdd, onPostInterest, onSettle,
+  onDeleteBorrower, onDeleteLoan, onExportLoan, onShareLoan, onShareLoanPdf, onShareLoanImage,
 }) {
   const filtered = borrowers.filter((b) => {
     const q = search.trim().toLowerCase();
@@ -3300,9 +3579,14 @@ function LendingView({
               <div className="text-lg font-bold text-slate-800">{borrower?.name || "Borrower"}</div>
               <div className="text-xs text-slate-400">{viewingLoan.interestType === "compound" ? "Compound" : "Simple"} interest · {viewingLoan.rate}% monthly · From {fmtDate(viewingLoan.startDate)}</div>
             </div>
-            <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${viewingLoan.status === "settled" ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
-              {viewingLoan.status === "settled" ? "Settled" : "Active"}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${viewingLoan.status === "settled" ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
+                {viewingLoan.status === "settled" ? "Settled" : "Active"}
+              </span>
+              <button onClick={() => onDeleteLoan(viewingLoan)} className="w-9 h-9 rounded-lg bg-red-50 text-red-600 flex items-center justify-center" title="Delete loan">
+                <Trash2 size={15} />
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-2 mt-4">
             <StatCard label="Current Balance" value={`₹${round2(state.totalBalance)}`} accent="#215464" />
@@ -3320,18 +3604,25 @@ function LendingView({
         </div>
 
         {viewingLoan.status !== "settled" && (
-          <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
             <button onClick={onDeposit} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600">Deposit</button>
+            <button onClick={onPrincipalAdd} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600">Add Principal</button>
             <button onClick={onPostInterest} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600">Post Interest</button>
             <button onClick={onSettle} className="py-2.5 rounded-xl text-white text-xs font-semibold" style={{ background: "#b3391f" }}>Settle</button>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-2 mb-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
           <button onClick={() => onExportLoan(viewingLoan)} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600 flex items-center justify-center gap-1.5">
             <Download size={14} /> CSV Statement
           </button>
+          <button onClick={() => onShareLoanPdf(viewingLoan)} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600 flex items-center justify-center gap-1.5">
+            <Printer size={14} /> PDF
+          </button>
+          <button onClick={() => onShareLoanImage(viewingLoan)} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600 flex items-center justify-center gap-1.5">
+            <ImageIcon size={14} /> JPG
+          </button>
           <button onClick={() => onShareLoan(viewingLoan)} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600 flex items-center justify-center gap-1.5">
-            <Share2 size={14} /> Share Progress
+            <Share2 size={14} /> Text
           </button>
         </div>
 
@@ -3380,9 +3671,14 @@ function LendingView({
               {viewingBorrower.phone && <div className="text-sm text-slate-400 flex items-center gap-1 mt-0.5"><Phone size={13} /> {viewingBorrower.phone}</div>}
               {viewingBorrower.address && <div className="text-xs text-slate-400 mt-1">{viewingBorrower.address}</div>}
             </div>
-            <button onClick={onNewLoan} className="px-3 py-2 rounded-lg text-white text-xs font-semibold" style={{ background: "#215464" }}>
-              New Loan
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => onDeleteBorrower(viewingBorrower)} className="w-9 h-9 rounded-lg bg-red-50 text-red-600 flex items-center justify-center" title="Delete borrower">
+                <Trash2 size={15} />
+              </button>
+              <button onClick={onNewLoan} className="px-3 py-2 rounded-lg text-white text-xs font-semibold" style={{ background: "#215464" }}>
+                New Loan
+              </button>
+            </div>
           </div>
           {(viewingBorrower.idRef || viewingBorrower.notes) && (
             <div className="mt-3 text-xs text-slate-500">
