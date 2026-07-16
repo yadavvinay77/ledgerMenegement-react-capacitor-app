@@ -1,6 +1,6 @@
 # Milk Ledger Android
 
-Milk Ledger is an offline-first Android dairy ledger for purchase suppliers and sale customers. It tracks milk/item entries, payments, opening balances, rate tables, date-filtered dashboards, account statements, backups, and business profile metadata.
+Milk Ledger is an offline-first Android dairy and finance ledger for purchase suppliers, sale customers, and interest-based lending accounts. It tracks milk/item entries, payments, opening balances, rate tables, date-filtered dashboards, account statements, lending ledgers, backups, and business profile metadata.
 
 Built with React, Vite, Tailwind CSS, Capacitor, Recharts, jsPDF, and Android native sharing.
 
@@ -23,6 +23,7 @@ Built with React, Vite, Tailwind CSS, Capacitor, Recharts, jsPDF, and Android na
 - Money transactions for credit/debit adjustments.
 - Date-range dashboard filter for period purchase, sale, net, dues, and transaction activity.
 - Statement screen with date filters, previous balance carry-forward, totals, running balance, CSV, PDF, image, and text sharing.
+- Lending tab for borrower profiles, simple/compound interest loans, deposits, monthly interest posting, guarantor/collateral notes, and settlement amounts.
 - Account tab for business profile, backup export, auto-backup preferences, security preference, language preference, and activity log.
 - Offline local storage through a small `window.storage` compatibility layer.
 - Android native file sharing through Capacitor Share and Filesystem.
@@ -49,6 +50,22 @@ Statement exports include:
 - Date, particulars, units, paid, credit, debit, running balance
 - Bottom total row across table columns
 - Detailed notes
+
+## Lending Calculation
+
+Each borrower can have one or more loan accounts. Loan accounts support:
+
+- Principal amount and start date
+- Simple or compound interest
+- Monthly interest rate
+- Optional duration
+- Guarantor contact
+- Guarantee/collateral notes
+- Deposits/payments
+- Monthly interest posting
+- Settlement calculation
+
+For simple interest, deposits clear posted interest first and then reduce principal. For compound interest, posted interest is added to the running balance and deposits reduce that balance.
 
 ## Project Structure
 
@@ -122,6 +139,8 @@ The Account tab creates a JSON backup containing:
 - Account preferences
 - Customers
 - Transactions
+- Borrowers
+- Loans and loan ledger entries
 - Rate settings
 - Activity log
 
@@ -142,6 +161,6 @@ These are currently preference settings. Full biometric enforcement, PIN lock sc
 
 ## Release Status
 
-Current version: `0.2.0`
+Current version: `0.3.0`
 
 This is a debug/development build prepared for Android tablet/mobile testing.

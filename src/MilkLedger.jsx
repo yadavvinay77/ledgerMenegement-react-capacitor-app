@@ -142,10 +142,91 @@ const Field = ({ label, children, hint }) => (
   </div>
 );
 
+const monthDiff = (from, to) => {
+  const a = new Date(`${from}T00:00:00`);
+  const b = new Date(`${to}T00:00:00`);
+  return Math.max(0, (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()));
+};
+
+const daysBetween = (from, to) => {
+  const a = new Date(`${from}T00:00:00`);
+  const b = new Date(`${to}T00:00:00`);
+  return Math.max(0, Math.floor((b - a) / 86400000));
+};
+
+const addMonthsISO = (iso, months) => {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setMonth(d.getMonth() + months);
+  return toISODate(d);
+};
+
+const loanEntryAmount = (entry) => round2(parseFloat(entry.amount) || 0);
+
+const calculateLoanState = (loan, asOf = todayStr()) => {
+  const entries = [...(loan.entries || [])].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0));
+  let principal = round2(parseFloat(loan.principal) || 0);
+  let interestDue = 0;
+  let compoundBalance = principal;
+  let lastInterestDate = loan.startDate;
+  let status = loan.status || "active";
+
+  entries.forEach((entry) => {
+    if (entry.date > asOf) return;
+    const amount = loanEntryAmount(entry);
+    if (entry.type === "interest") {
+      lastInterestDate = entry.date;
+      if (loan.interestType === "compound") compoundBalance = round2(compoundBalance + amount);
+      else interestDue = round2(interestDue + amount);
+    }
+    if (entry.type === "deposit") {
+      if (loan.interestType === "compound") {
+        compoundBalance = round2(Math.max(0, compoundBalance - amount));
+      } else {
+        const toInterest = Math.min(interestDue, amount);
+        interestDue = round2(interestDue - toInterest);
+        principal = round2(Math.max(0, principal - (amount - toInterest)));
+      }
+    }
+    if (entry.type === "settlement") {
+      status = "settled";
+      if (loan.interestType === "compound") compoundBalance = 0;
+      else {
+        principal = 0;
+        interestDue = 0;
+      }
+    }
+  });
+
+  const base = loan.interestType === "compound" ? compoundBalance : principal;
+  const totalBalance = loan.interestType === "compound" ? compoundBalance : round2(principal + interestDue);
+  const monthlyInterest = round2(base * ((parseFloat(loan.rate) || 0) / 100));
+  const monthsDue = monthDiff(lastInterestDate || loan.startDate, asOf);
+  const projectedInterest = round2(monthlyInterest * Math.max(1, monthsDue || 1));
+  const partialDays = daysBetween(lastInterestDate || loan.startDate, asOf);
+  const settlementInterest = round2(base * ((parseFloat(loan.rate) || 0) / 100) * (partialDays / 30));
+  const settlementAmount = round2(totalBalance + settlementInterest);
+
+  return {
+    principal,
+    interestDue,
+    compoundBalance,
+    totalBalance,
+    monthlyInterest,
+    projectedInterest,
+    settlementInterest,
+    settlementAmount,
+    lastInterestDate,
+    nextInterestDate: addMonthsISO(lastInterestDate || loan.startDate, 1),
+    status,
+  };
+};
+
 export default function MilkLedger() {
   const [ready, setReady] = useState(false);
   const [customers, setCustomers] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [borrowers, setBorrowers] = useState([]);
+  const [loans, setLoans] = useState([]);
   const [rates, setRates] = useState({ purchase: 200, sale: 220, saleItems: DEFAULT_SALE_ITEM_RATES, purchaseMatrix: DEFAULT_PURCHASE_RATE_MATRIX });
   const [tab, setTab] = useState("dashboard");
   const [customerFlow, setCustomerFlow] = useState("purchase"); // which list is shown on Customers tab
@@ -178,6 +259,10 @@ export default function MilkLedger() {
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [lendingSearch, setLendingSearch] = useState("");
+  const [viewingBorrower, setViewingBorrower] = useState(null);
+  const [viewingLoan, setViewingLoan] = useState(null);
+  const [lendingDialog, setLendingDialog] = useState(null); // borrower | loan | deposit | interest | settle
   const [showAssistant, setShowAssistant] = useState(false);
   const [showSeedConfirm, setShowSeedConfirm] = useState(false);
 
@@ -218,6 +303,14 @@ export default function MilkLedger() {
         const t = await window.storage.get("transactions");
         setTransactions(t ? JSON.parse(t.value) : []);
       } catch { setTransactions([]); }
+      try {
+        const b = await window.storage.get("borrowers");
+        setBorrowers(b ? JSON.parse(b.value) : []);
+      } catch { setBorrowers([]); }
+      try {
+        const l = await window.storage.get("loans");
+        setLoans(l ? JSON.parse(l.value) : []);
+      } catch { setLoans([]); }
       try {
         const s = await window.storage.get("settings");
         const parsed = s ? JSON.parse(s.value) : { purchase: 200, sale: 220, saleItems: DEFAULT_SALE_ITEM_RATES, purchaseMatrix: DEFAULT_PURCHASE_RATE_MATRIX };
@@ -279,6 +372,14 @@ export default function MilkLedger() {
     transactions: async (list) => {
       setTransactions(list);
       try { await window.storage.set("transactions", JSON.stringify(list)); } catch {}
+    },
+    borrowers: async (list) => {
+      setBorrowers(list);
+      try { await window.storage.set("borrowers", JSON.stringify(list)); } catch {}
+    },
+    loans: async (list) => {
+      setLoans(list);
+      try { await window.storage.set("loans", JSON.stringify(list)); } catch {}
     },
     settings: async (s) => {
       try { await window.storage.set("settings", JSON.stringify(s)); } catch {}
@@ -364,6 +465,106 @@ export default function MilkLedger() {
   };
 
   const customerById = (id) => customers.find((c) => c.id === id);
+  const borrowerById = (id) => borrowers.find((b) => b.id === id);
+  const loansForBorrower = (borrowerId) => loans.filter((loan) => loan.borrowerId === borrowerId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  const refreshViewingLoan = (updatedLoans) => {
+    if (viewingLoan) setViewingLoan(updatedLoans.find((loan) => loan.id === viewingLoan.id) || null);
+  };
+
+  const saveBorrower = async (borrower) => {
+    const next = [{ id: uid(), createdAt: Date.now(), ...borrower }, ...borrowers];
+    await persist.borrowers(next);
+    setViewingBorrower(next[0]);
+    setLendingDialog(null);
+    showToast("Borrower saved");
+    logActivity("lending", `Added borrower: ${borrower.name}`);
+  };
+
+  const saveLoan = async (draft) => {
+    const amount = round2(parseFloat(draft.principal) || 0);
+    if (!viewingBorrower || amount <= 0) return;
+    const loan = {
+      id: uid(),
+      borrowerId: viewingBorrower.id,
+      principal: amount,
+      startDate: draft.startDate || todayStr(),
+      interestType: draft.interestType || "simple",
+      rate: parseFloat(draft.rate) || 0,
+      durationMonths: draft.durationMonths ? parseInt(draft.durationMonths, 10) : null,
+      guarantorName: draft.guarantorName || "",
+      guarantorPhone: draft.guarantorPhone || "",
+      collateral: draft.collateral || "",
+      notes: draft.notes || "",
+      status: "active",
+      createdAt: Date.now(),
+      entries: [{
+        id: uid(),
+        type: "disbursement",
+        date: draft.startDate || todayStr(),
+        amount,
+        note: "Loan principal",
+        createdAt: Date.now(),
+      }],
+    };
+    const next = [loan, ...loans];
+    await persist.loans(next);
+    setViewingLoan(loan);
+    setLendingDialog(null);
+    showToast("Loan account created");
+    logActivity("lending", `Created loan for ${viewingBorrower.name}: ₹${amount}`);
+  };
+
+  const updateLoan = async (loanId, updater) => {
+    const next = loans.map((loan) => loan.id === loanId ? updater(loan) : loan);
+    await persist.loans(next);
+    refreshViewingLoan(next);
+    maybeAutoBackupSnapshot();
+  };
+
+  const addLoanEntry = async (loanId, entry) => {
+    await updateLoan(loanId, (loan) => ({
+      ...loan,
+      entries: [{ id: uid(), createdAt: Date.now(), ...entry }, ...(loan.entries || [])],
+      status: entry.type === "settlement" ? "settled" : loan.status,
+      settledAt: entry.type === "settlement" ? entry.date : loan.settledAt,
+    }));
+  };
+
+  const saveDeposit = async (draft) => {
+    if (!viewingLoan) return;
+    const amount = round2(parseFloat(draft.amount) || 0);
+    if (amount <= 0) return;
+    await addLoanEntry(viewingLoan.id, { type: "deposit", date: draft.date || todayStr(), amount, note: draft.note || "Deposit/payment received" });
+    setLendingDialog(null);
+    showToast("Deposit logged");
+    logActivity("lending", `Deposit ₹${amount} for ${borrowerById(viewingLoan.borrowerId)?.name || "borrower"}`);
+  };
+
+  const postLoanInterest = async (draft) => {
+    if (!viewingLoan) return;
+    const amount = round2(parseFloat(draft.amount) || 0);
+    if (amount <= 0) return;
+    await addLoanEntry(viewingLoan.id, { type: "interest", date: draft.date || todayStr(), amount, note: draft.note || "Monthly interest posted" });
+    setLendingDialog(null);
+    showToast("Interest posted");
+    logActivity("lending", `Posted interest ₹${amount} for ${borrowerById(viewingLoan.borrowerId)?.name || "borrower"}`);
+  };
+
+  const settleLoan = async (draft) => {
+    if (!viewingLoan) return;
+    const amount = round2(parseFloat(draft.amount) || 0);
+    if (amount <= 0) return;
+    await addLoanEntry(viewingLoan.id, { type: "settlement", date: draft.date || todayStr(), amount, note: draft.note || "Loan settled" });
+    setLendingDialog(null);
+    showToast("Loan settled");
+    logActivity("lending", `Settled loan for ${borrowerById(viewingLoan.borrowerId)?.name || "borrower"} at ₹${amount}`);
+  };
+
+  const openBorrower = (borrower) => {
+    setViewingBorrower(borrower);
+    setViewingLoan(null);
+  };
 
   const openNewEntry = (customer) => {
     setDialogCustomer(customer);
@@ -560,6 +761,8 @@ export default function MilkLedger() {
     exportedAt: new Date().toISOString(),
     customers,
     transactions,
+    borrowers,
+    loans,
     rates,
     businessProfile,
   });
@@ -598,6 +801,8 @@ export default function MilkLedger() {
     if (!data) return;
     await persist.customers(data.customers);
     await persist.transactions(data.transactions);
+    if (Array.isArray(data.borrowers)) await persist.borrowers(data.borrowers);
+    if (Array.isArray(data.loans)) await persist.loans(data.loans);
     if (data.rates) { setRates(data.rates); await persist.settings(data.rates); }
     if (data.businessProfile) { await persist.businessProfile(data.businessProfile); }
     setPendingRestore(null);
@@ -2103,6 +2308,27 @@ Sentence: "${text}"`;
           </div>
         )}
 
+        {tab === "lending" && (
+          <LendingView
+            borrowers={borrowers}
+            loans={loans}
+            search={lendingSearch}
+            setSearch={setLendingSearch}
+            viewingBorrower={viewingBorrower}
+            viewingLoan={viewingLoan}
+            setViewingBorrower={setViewingBorrower}
+            setViewingLoan={setViewingLoan}
+            openBorrower={openBorrower}
+            borrowerById={borrowerById}
+            loansForBorrower={loansForBorrower}
+            onNewBorrower={() => setLendingDialog("borrower")}
+            onNewLoan={() => setLendingDialog("loan")}
+            onDeposit={() => setLendingDialog("deposit")}
+            onPostInterest={() => setLendingDialog("interest")}
+            onSettle={() => setLendingDialog("settle")}
+          />
+        )}
+
         {tab === "account" && (
           <div>
             {accountView === "menu" && (
@@ -2534,6 +2760,7 @@ Sentence: "${text}"`;
           { id: "dashboard", icon: LayoutDashboard, label: t("navDashboard") },
           { id: "customers", icon: Users, label: t("navParties") },
           { id: "history", icon: History, label: t("navHistory") },
+          { id: "lending", icon: Wallet, label: "Lending" },
           { id: "account", icon: UserCircle2, label: t("navAccount") },
         ].map(({ id, icon: Icon, label }) => (
           <button key={id} onClick={() => setTab(id)} className="flex flex-col items-center gap-0.5 px-3 py-1">
@@ -2775,7 +3002,51 @@ Sentence: "${text}"`;
         <ShareSheet title={shareSheet.title} text={shareSheet.text} onClose={() => setShareSheet(null)} />
       )}
 
-      {!showAssistant && !dialogCustomer && !showAddCustomer && !deleteTarget && !invoiceTxn && !showSeedConfirm && !shareSheet && (
+      {lendingDialog === "borrower" && (
+        <BorrowerDialog onClose={() => setLendingDialog(null)} onSave={saveBorrower} />
+      )}
+
+      {lendingDialog === "loan" && viewingBorrower && (
+        <LoanDialog borrower={viewingBorrower} onClose={() => setLendingDialog(null)} onSave={saveLoan} />
+      )}
+
+      {lendingDialog === "deposit" && viewingLoan && (
+        <LoanAmountDialog
+          title="Add Deposit"
+          defaultDate={todayStr()}
+          defaultAmount=""
+          defaultNote="Deposit/payment received"
+          actionLabel="Save Deposit"
+          onClose={() => setLendingDialog(null)}
+          onSave={saveDeposit}
+        />
+      )}
+
+      {lendingDialog === "interest" && viewingLoan && (
+        <LoanAmountDialog
+          title="Post Interest"
+          defaultDate={calculateLoanState(viewingLoan).nextInterestDate}
+          defaultAmount={calculateLoanState(viewingLoan).projectedInterest}
+          defaultNote="Monthly interest posted"
+          actionLabel="Post Interest"
+          onClose={() => setLendingDialog(null)}
+          onSave={postLoanInterest}
+        />
+      )}
+
+      {lendingDialog === "settle" && viewingLoan && (
+        <LoanAmountDialog
+          title="Settle Loan"
+          defaultDate={todayStr()}
+          defaultAmount={calculateLoanState(viewingLoan, todayStr()).settlementAmount}
+          defaultNote="Loan settled"
+          actionLabel="Save Settlement"
+          onClose={() => setLendingDialog(null)}
+          onSave={settleLoan}
+        />
+      )}
+
+      {!showAssistant && !dialogCustomer && !showAddCustomer && !deleteTarget && !invoiceTxn && !showSeedConfirm && !shareSheet && !lendingDialog && (
         <button
           onClick={() => { setShowAssistant(true); setAssistantView("chat"); }}
           className="assistant-fab absolute z-10 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white"
@@ -2894,6 +3165,200 @@ Sentence: "${text}"`;
             </div>
           )}
         </Modal>
+      )}
+    </div>
+  );
+}
+
+// ---------- Lending / finance ledger ----------
+function LendingView({
+  borrowers, loans, search, setSearch, viewingBorrower, viewingLoan,
+  setViewingBorrower, setViewingLoan, openBorrower, borrowerById, loansForBorrower,
+  onNewBorrower, onNewLoan, onDeposit, onPostInterest, onSettle,
+}) {
+  const filtered = borrowers.filter((b) => {
+    const q = search.trim().toLowerCase();
+    return !q || [b.name, b.phone, b.address].filter(Boolean).some((v) => v.toLowerCase().includes(q));
+  });
+
+  const activeLoans = loans.filter((loan) => loan.status !== "settled");
+  const totals = activeLoans.reduce((acc, loan) => {
+    const state = calculateLoanState(loan);
+    acc.balance += state.totalBalance;
+    acc.interest += loan.interestType === "compound" ? 0 : state.interestDue;
+    acc.projected += state.projectedInterest;
+    return acc;
+  }, { balance: 0, interest: 0, projected: 0 });
+
+  if (viewingLoan) {
+    const borrower = borrowerById(viewingLoan.borrowerId);
+    const state = calculateLoanState(viewingLoan);
+    const rows = [...(viewingLoan.entries || [])].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || 0) - (a.createdAt || 0));
+    return (
+      <div>
+        <button onClick={() => setViewingLoan(null)} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
+          <ArrowLeft size={14} /> Back to loans
+        </button>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-lg font-bold text-slate-800">{borrower?.name || "Borrower"}</div>
+              <div className="text-xs text-slate-400">{viewingLoan.interestType === "compound" ? "Compound" : "Simple"} interest · {viewingLoan.rate}% monthly · From {fmtDate(viewingLoan.startDate)}</div>
+            </div>
+            <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${viewingLoan.status === "settled" ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
+              {viewingLoan.status === "settled" ? "Settled" : "Active"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-4">
+            <StatCard label="Current Balance" value={`₹${round2(state.totalBalance)}`} accent="#215464" />
+            <StatCard label="Projected Interest" value={`₹${round2(state.projectedInterest)}`} sub={`Next: ${fmtDate(state.nextInterestDate)}`} accent="#a1690a" />
+            <StatCard label="Principal" value={`₹${round2(state.principal)}`} />
+            <StatCard label="Settlement Today" value={`₹${round2(state.settlementAmount)}`} accent="#b3391f" />
+          </div>
+          {(viewingLoan.guarantorName || viewingLoan.collateral || viewingLoan.notes) && (
+            <div className="mt-3 text-xs text-slate-500 space-y-1">
+              {viewingLoan.guarantorName && <div><span className="font-semibold">Guarantor:</span> {viewingLoan.guarantorName}{viewingLoan.guarantorPhone ? ` · ${viewingLoan.guarantorPhone}` : ""}</div>}
+              {viewingLoan.collateral && <div><span className="font-semibold">Guarantee:</span> {viewingLoan.collateral}</div>}
+              {viewingLoan.notes && <div><span className="font-semibold">Notes:</span> {viewingLoan.notes}</div>}
+            </div>
+          )}
+        </div>
+
+        {viewingLoan.status !== "settled" && (
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <button onClick={onDeposit} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600">Deposit</button>
+            <button onClick={onPostInterest} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600">Post Interest</button>
+            <button onClick={onSettle} className="py-2.5 rounded-xl text-white text-xs font-semibold" style={{ background: "#b3391f" }}>Settle</button>
+          </div>
+        )}
+
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Loan Ledger</div>
+          <div className="txn-table-wrap overflow-x-auto">
+            <table className="min-w-[680px] w-full text-[12px]">
+              <thead className="bg-slate-50 text-slate-500 text-left">
+                <tr>
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2">Amount</th>
+                  <th className="px-3 py-2">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="bg-amber-50/60">
+                  <td className="px-3 py-2">{fmtDate(state.nextInterestDate)}</td>
+                  <td className="px-3 py-2 font-semibold text-amber-700">Projected</td>
+                  <td className="px-3 py-2 font-semibold text-amber-700">₹{state.projectedInterest}</td>
+                  <td className="px-3 py-2 text-slate-500">Not posted yet</td>
+                </tr>
+                {rows.map((entry) => (
+                  <tr key={entry.id} className="border-t border-slate-100">
+                    <td className="px-3 py-2 whitespace-nowrap">{fmtDate(entry.date)}</td>
+                    <td className="px-3 py-2 capitalize">{entry.type}</td>
+                    <td className="px-3 py-2 font-semibold">₹{round2(entry.amount)}</td>
+                    <td className="px-3 py-2 text-slate-500">{entry.note || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (viewingBorrower) {
+    const borrowerLoans = loansForBorrower(viewingBorrower.id);
+    return (
+      <div>
+        <button onClick={() => setViewingBorrower(null)} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
+          <ArrowLeft size={14} /> Back
+        </button>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-lg font-bold text-slate-800">{viewingBorrower.name}</div>
+              {viewingBorrower.phone && <div className="text-sm text-slate-400 flex items-center gap-1 mt-0.5"><Phone size={13} /> {viewingBorrower.phone}</div>}
+              {viewingBorrower.address && <div className="text-xs text-slate-400 mt-1">{viewingBorrower.address}</div>}
+            </div>
+            <button onClick={onNewLoan} className="px-3 py-2 rounded-lg text-white text-xs font-semibold" style={{ background: "#215464" }}>
+              New Loan
+            </button>
+          </div>
+          {(viewingBorrower.idRef || viewingBorrower.notes) && (
+            <div className="mt-3 text-xs text-slate-500">
+              {viewingBorrower.idRef && <div><span className="font-semibold">ID/Ref:</span> {viewingBorrower.idRef}</div>}
+              {viewingBorrower.notes && <div><span className="font-semibold">Notes:</span> {viewingBorrower.notes}</div>}
+            </div>
+          )}
+        </div>
+
+        {borrowerLoans.length === 0 ? (
+          <div className="text-center text-slate-400 text-sm py-10 bg-white rounded-xl border border-slate-200">No loan accounts yet.</div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {borrowerLoans.map((loan) => {
+              const state = calculateLoanState(loan);
+              return (
+                <button key={loan.id} onClick={() => setViewingLoan(loan)} className="w-full text-left bg-white rounded-xl border border-slate-200 px-4 py-3 active:bg-slate-50">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">₹{round2(loan.principal)} · {loan.interestType === "compound" ? "Compound" : "Simple"}</div>
+                      <div className="text-xs text-slate-400">{loan.rate}% monthly · {fmtDate(loan.startDate)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-bold text-[#215464]">₹{round2(state.totalBalance)}</div>
+                      <div className="text-[10px] text-slate-400">{loan.status === "settled" ? "Settled" : "Current balance"}</div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <StatCard label="Active Loans" value={String(activeLoans.length)} />
+        <StatCard label="Balance" value={`₹${round2(totals.balance)}`} accent="#215464" />
+        <StatCard label="Projected" value={`₹${round2(totals.projected)}`} accent="#a1690a" />
+      </div>
+      <div className="flex items-center gap-2 mb-3">
+        <div className="flex-1 flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2.5">
+          <Search size={16} className="text-slate-400 shrink-0" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search borrowers..." className="flex-1 outline-none text-base bg-transparent" />
+        </div>
+        <button onClick={onNewBorrower} className="w-10 h-10 rounded-xl text-white flex items-center justify-center shrink-0" style={{ background: "#215464" }}>
+          <Plus size={19} />
+        </button>
+      </div>
+      {filtered.length === 0 ? (
+        <div className="text-center text-slate-400 text-sm mt-16">No borrowers yet.<br />Tap + to add your first finance profile.</div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {filtered.map((borrower) => {
+            const borrowerLoans = loansForBorrower(borrower.id);
+            const active = borrowerLoans.filter((loan) => loan.status !== "settled");
+            const bal = active.reduce((s, loan) => s + calculateLoanState(loan).totalBalance, 0);
+            return (
+              <button key={borrower.id} onClick={() => openBorrower(borrower)} className="w-full text-left bg-white rounded-xl border border-slate-200 px-4 py-3 flex items-center justify-between active:bg-slate-50">
+                <div>
+                  <div className="text-[15px] font-medium text-slate-800">{borrower.name}</div>
+                  {borrower.phone && <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5"><Phone size={11} /> {borrower.phone}</div>}
+                  <div className="text-xs text-slate-400 mt-0.5">{active.length} active loan{active.length === 1 ? "" : "s"}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-bold text-[#215464]">₹{round2(bal)}</div>
+                  <ChevronRight size={18} className="text-slate-300 ml-auto mt-1" />
+                </div>
+              </button>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -3560,6 +4025,80 @@ const Row = ({ label, value }) => (
     <td className="py-1.5 text-slate-800 font-medium text-right">{value}</td>
   </tr>
 );
+function BorrowerDialog({ onClose, onSave }) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [idRef, setIdRef] = useState("");
+  const [notes, setNotes] = useState("");
+
+  return (
+    <Modal title="Add Borrower" onClose={onClose} footer={
+      <button disabled={!name.trim()} onClick={() => onSave({ name: name.trim(), phone: phone.trim(), address: address.trim(), idRef: idRef.trim(), notes: notes.trim() })} className="w-full py-3 rounded-xl text-white font-medium disabled:opacity-40" style={{ background: "#215464" }}>
+        Save Borrower
+      </button>
+    }>
+      <Field label="Full Name"><input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+      <Field label="Phone"><input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+      <Field label="Address"><textarea value={address} onChange={(e) => setAddress(e.target.value)} className="w-full h-20 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none resize-none" /></Field>
+      <Field label="ID / Reference"><input value={idRef} onChange={(e) => setIdRef(e.target.value)} placeholder="Aadhaar/ref/document note" className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+      <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full h-20 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none resize-none" /></Field>
+    </Modal>
+  );
+}
+
+function LoanDialog({ borrower, onClose, onSave }) {
+  const [startDate, setStartDate] = useState(todayStr());
+  const [principal, setPrincipal] = useState("");
+  const [interestType, setInterestType] = useState("simple");
+  const [rate, setRate] = useState("2");
+  const [durationMonths, setDurationMonths] = useState("");
+  const [guarantorName, setGuarantorName] = useState("");
+  const [guarantorPhone, setGuarantorPhone] = useState("");
+  const [collateral, setCollateral] = useState("");
+  const [notes, setNotes] = useState("");
+
+  return (
+    <Modal title={`New Loan - ${borrower.name}`} onClose={onClose} footer={
+      <button disabled={!(parseFloat(principal) > 0) || !(parseFloat(rate) >= 0)} onClick={() => onSave({ startDate, principal, interestType, rate, durationMonths, guarantorName, guarantorPhone, collateral, notes })} className="w-full py-3 rounded-xl text-white font-medium disabled:opacity-40" style={{ background: "#215464" }}>
+        Save Loan
+      </button>
+    }>
+      <Field label="Date Given"><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+      <Field label="Principal Amount"><input autoFocus type="number" inputMode="decimal" value={principal} onChange={(e) => setPrincipal(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+      <Field label="Interest Type"><PillGroup options={["simple", "compound"]} value={interestType} onChange={setInterestType} columns={2} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Rate % Monthly"><input type="number" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+        <Field label="Duration Months"><input type="number" inputMode="numeric" value={durationMonths} onChange={(e) => setDurationMonths(e.target.value)} placeholder="Optional" className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Guarantor"><input value={guarantorName} onChange={(e) => setGuarantorName(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+        <Field label="Guarantor Phone"><input value={guarantorPhone} onChange={(e) => setGuarantorPhone(e.target.value)} inputMode="tel" className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+      </div>
+      <Field label="Guarantee / Collateral" hint="Examples: ornaments, property papers, cheque, vehicle papers."><textarea value={collateral} onChange={(e) => setCollateral(e.target.value)} className="w-full h-20 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none resize-none" /></Field>
+      <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full h-20 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none resize-none" /></Field>
+    </Modal>
+  );
+}
+
+function LoanAmountDialog({ title, defaultDate, defaultAmount, defaultNote, actionLabel, onClose, onSave }) {
+  const [date, setDate] = useState(defaultDate || todayStr());
+  const [amount, setAmount] = useState(String(defaultAmount ?? ""));
+  const [note, setNote] = useState(defaultNote || "");
+
+  return (
+    <Modal title={title} onClose={onClose} footer={
+      <button disabled={!(parseFloat(amount) > 0)} onClick={() => onSave({ date, amount, note })} className="w-full py-3 rounded-xl text-white font-medium disabled:opacity-40" style={{ background: "#215464" }}>
+        {actionLabel}
+      </button>
+    }>
+      <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+      <Field label="Amount"><input autoFocus type="number" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
+      <Field label="Notes"><textarea value={note} onChange={(e) => setNote(e.target.value)} className="w-full h-24 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none resize-none" /></Field>
+    </Modal>
+  );
+}
+
 // ---------- Entry dialog ----------
 function EntryDialog({ customer, defaultRate, rateMatrix, existing, onClose, onSave }) {
   const flowMeta = FLOW_META[customer.flow];

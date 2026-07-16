@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.0
+
+- Added a new Lending tab for borrower profiles and interest-based loan accounts.
+- Added loan creation with principal, start date, simple/compound interest, monthly rate, duration, guarantor, collateral/guarantee, and notes.
+- Added loan ledger entries for disbursement, deposits, monthly interest posting, and settlement.
+- Added simple-interest and compound-interest balance calculations with projected next interest and settlement amount.
+- Included lending borrowers and loans in JSON backup/restore.
+
 ## v0.2.2
 
 - Fixed Assistant intent ordering so "add/log transaction" commands are parsed as transaction drafts instead of being treated as statement navigation.
