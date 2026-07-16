@@ -1602,7 +1602,7 @@ Sentence: "${text}"`;
 
   if (!ready) {
     return (
-      <div className="h-full min-h-[600px] flex items-center justify-center bg-[#F7F8F6]">
+      <div className="app-shell flex items-center justify-center bg-[#F7F8F6]">
         <div className="text-slate-400 text-sm">Loading ledger…</div>
       </div>
     );
@@ -1610,7 +1610,7 @@ Sentence: "${text}"`;
 
   if (security.pinEnabled && locked) {
     return (
-      <div className="min-h-[700px] bg-[#0f172a] flex flex-col items-center justify-center px-6" style={{ maxWidth: 480, margin: "0 auto" }}>
+      <div className="app-shell bg-[#0f172a] flex flex-col items-center justify-center px-6">
         <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mb-4">
           <LockKeyhole size={28} className="text-white" />
         </div>
@@ -1646,10 +1646,10 @@ Sentence: "${text}"`;
   }
 
   return (
-    <div className="min-h-[700px] bg-[#F7F8F6] flex flex-col font-[system-ui]" style={{ maxWidth: 480, margin: "0 auto", position: "relative" }}>
+    <div className="app-shell bg-[#F7F8F6] flex flex-col font-[system-ui]">
       {viewingParty ? (
         <>
-          <div className="px-5 pt-6 pb-4 text-white rounded-b-2xl print:hidden" style={{ background: FLOW_META[viewingParty.flow].color }}>
+          <div className="app-header px-5 pt-6 pb-4 text-white rounded-b-2xl print:hidden" style={{ background: FLOW_META[viewingParty.flow].color }}>
             <button onClick={() => setViewingParty(null)} className="flex items-center gap-1.5 text-sm text-white/80 mb-3">
               <ArrowLeft size={15} /> Back
             </button>
@@ -1672,7 +1672,7 @@ Sentence: "${text}"`;
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 pb-10 pt-4">
+          <div className="app-content flex-1 overflow-y-auto px-4 pb-10 pt-4">
             <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3 flex items-center justify-between print:hidden">
               <div className="flex-1">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Previous Balance</div>
@@ -1809,7 +1809,7 @@ Sentence: "${text}"`;
         </>
       ) : (
         <>
-      <div className="px-5 pt-6 pb-4 bg-[#215464] text-white rounded-b-2xl">
+      <div className="app-header px-5 pt-6 pb-4 bg-[#215464] text-white rounded-b-2xl">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center">
             <Droplet size={18} strokeWidth={2.2} />
@@ -1823,7 +1823,7 @@ Sentence: "${text}"`;
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
+      <div className="app-content flex-1 overflow-y-auto px-4 pb-24 pt-4">
         {tab === "dashboard" && (
           <Dashboard
             dashboard={dashboard}
@@ -2417,7 +2417,7 @@ Sentence: "${text}"`;
         )}
       </div>
 
-      <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around py-2 rounded-b-2xl">
+      <div className="bottom-nav absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around py-2 rounded-b-2xl">
         {[
           { id: "dashboard", icon: LayoutDashboard, label: t("navDashboard") },
           { id: "customers", icon: Users, label: t("navParties") },
@@ -2434,7 +2434,7 @@ Sentence: "${text}"`;
       )}
 
       {toast && (
-        <div className="absolute left-1/2 -translate-x-1/2 bottom-24 bg-slate-900 text-white text-xs px-4 py-2 rounded-full shadow-lg">
+        <div className="toast absolute left-1/2 -translate-x-1/2 bottom-24 bg-slate-900 text-white text-xs px-4 py-2 rounded-full shadow-lg">
           {toast}
         </div>
       )}
@@ -2666,7 +2666,7 @@ Sentence: "${text}"`;
       {!showAssistant && !dialogCustomer && !showAddCustomer && !deleteTarget && !invoiceTxn && !showSeedConfirm && !shareSheet && (
         <button
           onClick={() => { setShowAssistant(true); setAssistantView("chat"); }}
-          className="absolute z-10 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white"
+          className="assistant-fab absolute z-10 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white"
           style={{ right: 16, bottom: viewingParty ? 24 : 76, background: "#215464" }}
         >
           <MessageCircle size={24} />
@@ -3107,7 +3107,7 @@ function TxnTable({ rows, srNoMap, showParty, onInvoice, onEdit, onDelete, previ
     : ["Sr No", "Date / Time", "Shift", "Item", "Type", "Qty", "Rate", "Amount", "Status", "Credit", "Debit", "Note", "Action"];
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+    <div className="txn-table-wrap bg-white rounded-xl border border-slate-200 overflow-x-auto">
       <table className={`text-[12px] border-collapse ${showParty ? "min-w-[900px]" : "min-w-[800px]"}`}>
         <thead>
           <tr className="bg-slate-50 text-slate-500 text-left">
@@ -3222,10 +3222,9 @@ function TxnTable({ rows, srNoMap, showParty, onInvoice, onEdit, onDelete, previ
 // how tall the form is or whether the on-screen keyboard is open.
 function Modal({ title, children, footer, onClose }) {
   return (
-    <div className="absolute inset-0 bg-black/40 flex items-end z-20" onClick={onClose}>
+    <div className="modal-backdrop fixed inset-0 bg-black/40 flex items-end z-20" onClick={onClose}>
       <div
-        className="w-full bg-white rounded-t-2xl flex flex-col"
-        style={{ maxHeight: "92%" }}
+        className="modal-panel w-full bg-white rounded-t-2xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0 border-b border-slate-100">
@@ -3234,10 +3233,10 @@ function Modal({ title, children, footer, onClose }) {
             <X size={14} className="text-slate-500" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 pt-4" style={{ WebkitOverflowScrolling: "touch" }}>
+        <div className="modal-scroll flex-1 overflow-y-auto px-5 pt-4" style={{ WebkitOverflowScrolling: "touch" }}>
           {children}
         </div>
-        {footer && <div className="px-5 pt-3 pb-5 shrink-0 border-t border-slate-100">{footer}</div>}
+        {footer && <div className="modal-footer px-5 pt-3 pb-5 shrink-0 border-t border-slate-100">{footer}</div>}
       </div>
     </div>
   );
@@ -3343,8 +3342,8 @@ function InvoiceView({ txn, customer, srNo, onClose }) {
   };
 
   return (
-    <div className="min-h-[700px] bg-[#F2F3F1] flex flex-col items-center py-6 px-4 font-[system-ui]">
-      <div className="w-full print:hidden flex items-center justify-between mb-4 gap-2" style={{ maxWidth: 420 }}>
+    <div className="invoice-shell bg-[#F2F3F1] flex flex-col items-center py-6 px-4 font-[system-ui] overflow-y-auto">
+      <div className="invoice-toolbar w-full print:hidden flex items-center justify-between mb-4 gap-2">
         <button onClick={onClose} className="flex items-center gap-1.5 text-sm font-medium text-slate-600">
           <ArrowLeft size={16} /> Back
         </button>
@@ -3364,7 +3363,7 @@ function InvoiceView({ txn, customer, srNo, onClose }) {
         </div>
       </div>
 
-      <div className="w-full bg-white rounded-2xl border border-slate-200 p-6" style={{ maxWidth: 420 }}>
+      <div className="invoice-card w-full bg-white rounded-2xl border border-slate-200 p-6">
         <div className="flex items-center gap-2 mb-1">
           <Droplet size={18} className="text-[#215464]" />
           <div className="text-[17px] font-bold text-slate-800">Milk Ledger</div>

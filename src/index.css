@@ -18,6 +18,7 @@ body {
   color: #0f172a;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+  overflow: hidden;
 }
 
 button,
@@ -37,14 +38,20 @@ select {
   box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
 }
 
+.app-shell > * {
+  min-width: 0;
+}
+
 .app-header {
   padding-top: max(1.5rem, env(safe-area-inset-top));
+  flex-shrink: 0;
 }
 
 .app-content {
   min-height: 0;
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable both-edges;
+  overscroll-behavior: contain;
 }
 
 .bottom-nav {
@@ -65,19 +72,26 @@ select {
 .txn-table-wrap {
   width: 100%;
   -webkit-overflow-scrolling: touch;
+  max-width: 100%;
 }
 
 .modal-backdrop {
+  height: 100dvh;
   padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .modal-panel {
-  max-height: min(92dvh, 760px) !important;
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
   padding-bottom: env(safe-area-inset-bottom);
+  min-height: 0;
 }
 
 .modal-scroll {
   overscroll-behavior: contain;
+  min-height: 0;
 }
 
 .modal-footer {
@@ -86,6 +100,10 @@ select {
 
 .invoice-shell {
   min-height: 100dvh;
+  height: 100dvh;
+  padding-top: max(1rem, env(safe-area-inset-top));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling: touch;
 }
 
 .invoice-card,
@@ -172,6 +190,24 @@ select {
   }
 }
 
+@media (max-width: 699px) {
+  .modal-panel {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    width: 100%;
+  }
+
+  .modal-scroll {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .modal-footer {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
 @media (min-width: 1000px) {
   .app-shell {
     border-left: 1px solid rgba(15, 23, 42, 0.08);
@@ -217,7 +253,17 @@ select {
   }
 
   .modal-panel {
-    max-height: calc(100dvh - 1rem) !important;
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    border-radius: 0.75rem;
+  }
+
+  .modal-scroll {
+    padding-top: 0.75rem;
+  }
+
+  .invoice-shell {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
   }
 }
 
