@@ -142,6 +142,6 @@ These are currently preference settings. Full biometric enforcement, PIN lock sc
 
 ## Release Status
 
-Current version: `0.1.0`
+Current version: `0.2.0`
 
 This is a debug/development build prepared for Android tablet/mobile testing.

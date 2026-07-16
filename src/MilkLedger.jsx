@@ -1,6 +1,6 @@
-﻿import { useState, useEffect, useMemo, useRef } from "react";
-import { Plus, Search, X, Droplet, Users, History, LayoutDashboard, Settings as SettingsIcon, ChevronRight, Phone, Check, ArrowDownCircle, ArrowUpCircle, Receipt, Pencil, Trash2, Printer, ArrowLeft, Wallet, CalendarDays, ShoppingBag, Download, Share2, Filter, MessageCircle, Send, Loader2, Sparkles, Image as ImageIcon, Shield, Languages, Cloud, HardDrive, Activity, Clock3 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from "recharts";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Plus, Search, X, Droplet, Users, History, LayoutDashboard, Settings as SettingsIcon, ChevronRight, Phone, Check, ArrowDownCircle, ArrowUpCircle, Receipt, Pencil, Trash2, Printer, ArrowLeft, Wallet, CalendarDays, ShoppingBag, Download, Share2, Filter, MessageCircle, Send, Loader2, Sparkles, Image as ImageIcon, Building2, CloudUpload, CloudDownload, Fingerprint, Languages, ScrollText, LockKeyhole, UserCircle2 } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { Share } from "@capacitor/share";
 import { Filesystem, Directory, Encoding } from "@capacitor/filesystem";
 import { jsPDF } from "jspdf";
@@ -36,6 +36,7 @@ const normalizeSampleWeight = (raw) => {
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const toISODate = (d) => { const tz = d.getTimezoneOffset() * 60000; return new Date(d - tz).toISOString().slice(0, 10); };
 
 const STATUS_META = {
   paid: { label: "Paid", color: "#1b7a5e", bg: "#e6f4ef" },
@@ -76,58 +77,39 @@ const SALE_ITEMS = [
 ];
 const DEFAULT_SALE_ITEM_RATES = Object.fromEntries(SALE_ITEMS.map((i) => [i.key, i.defaultRate]));
 
-const DEFAULT_BUSINESS_PROFILE = {
-  name: "Milk Ledger",
-  subtitle: "Dairy purchase and sales account statement",
-  phone: "Business phone not set",
-  address: "Business address not set",
+// Translations cover core navigation and common actions — the app chrome
+// you see constantly. Full translation of every dialog's microcopy would be
+// a much larger follow-up; this gives working language switching for the
+// parts of the app you look at every time you open it.
+const LANGUAGES = [
+  { code: "en", label: "English" },
+  { code: "gu", label: "ગુજરાતી" },
+  { code: "hi", label: "हिन्दी" },
+];
+
+const TRANSLATIONS = {
+  en: {
+    appName: "Milk Ledger", navDashboard: "Dashboard", navParties: "Parties", navHistory: "History", navAccount: "Account",
+    save: "Save", cancel: "Cancel", delete: "Delete", edit: "Edit", back: "Back", search: "Search", close: "Close", add: "Add",
+    today: "Today", newTransaction: "New Transaction", statement: "Statement", previousBalance: "Previous Balance", balance: "Balance",
+    accountMenu: "Account", businessProfile: "Business Profile", ratesAndData: "Rates & Data", backupRestore: "Backup & Restore",
+    security: "Security", language: "Language", activityLog: "Activity Log",
+  },
+  gu: {
+    appName: "મિલ્ક લેજર", navDashboard: "ડેશબોર્ડ", navParties: "પક્ષો", navHistory: "ઇતિહાસ", navAccount: "ખાતું",
+    save: "સાચવો", cancel: "રદ કરો", delete: "કાઢી નાખો", edit: "સંપાદિત કરો", back: "પાછળ", search: "શોધો", close: "બંધ કરો", add: "ઉમેરો",
+    today: "આજે", newTransaction: "નવો વ્યવહાર", statement: "સ્ટેટમેન્ટ", previousBalance: "અગાઉનું બેલેન્સ", balance: "બેલેન્સ",
+    accountMenu: "ખાતું", businessProfile: "વ્યવસાય પ્રોફાઇલ", ratesAndData: "દરો અને ડેટા", backupRestore: "બેકઅપ અને પુનઃસ્થાપિત",
+    security: "સુરક્ષા", language: "ભાષા", activityLog: "પ્રવૃત્તિ લોગ",
+  },
+  hi: {
+    appName: "मिल्क लेजर", navDashboard: "डैशबोर्ड", navParties: "पार्टियाँ", navHistory: "इतिहास", navAccount: "खाता",
+    save: "सेव करें", cancel: "रद्द करें", delete: "हटाएं", edit: "संपादित करें", back: "वापस", search: "खोजें", close: "बंद करें", add: "जोड़ें",
+    today: "आज", newTransaction: "नया लेनदेन", statement: "स्टेटमेंट", previousBalance: "पिछला बैलेंस", balance: "बैलेंस",
+    accountMenu: "खाता", businessProfile: "व्यवसाय प्रोफ़ाइल", ratesAndData: "दरें और डेटा", backupRestore: "बैकअप और पुनर्स्थापना",
+    security: "सुरक्षा", language: "भाषा", activityLog: "गतिविधि लॉग",
+  },
 };
-
-const DEFAULT_ACCOUNT_SETTINGS = {
-  language: "English",
-  securityMode: "Off",
-  autoBackup: "Off",
-  backupTime: "21:00",
-};
-
-const currency = (n) => `₹${round2(n || 0)}`;
-
-const statementRangeText = (from, to) => {
-  if (!from && !to) return "Full history";
-  return `${from ? fmtDate(from) : "Start"} to ${to ? fmtDate(to) : "Today"}`;
-};
-
-const transactionDescription = (t) => {
-  if (t.kind === "money") return t.note ? `Money - ${t.note}` : "Money transaction";
-  if (t.kind === "item") return `${t.itemName}${t.note ? ` - ${t.note}` : ""}`;
-  return `${t.category} ${t.type}${t.shift ? ` - ${t.shift}` : ""}${t.note ? ` - ${t.note}` : ""}`;
-};
-
-const transactionUnits = (t) => {
-  if (t.kind === "money") return "-";
-  if (t.kind === "item") return `${t.qty} x ${currency(t.rate)}`;
-  return `${t.qty} L x ${currency(t.rate)}`;
-};
-
-const statementRowsWithBalance = (rows, opening) => {
-  let balance = round2(opening || 0);
-  return rows.map((t) => {
-    const credit = t.status === "credit" ? round2(t.amount) : 0;
-    const debit = t.status === "debit" ? round2(t.amount) : 0;
-    const paid = t.status === "paid" ? round2(t.amount) : 0;
-    balance = round2(balance + credit - debit);
-    return { ...t, paid, credit, debit, runningBalance: balance };
-  });
-};
-
-const statementTotals = (rows, closingBalance) => ({
-  qty: round2(rows.reduce((s, t) => s + (t.kind === "money" ? 0 : (t.qty || 0)), 0)),
-  amount: round2(rows.reduce((s, t) => s + (t.amount || 0), 0)),
-  paid: round2(rows.reduce((s, t) => s + (t.paid || 0), 0)),
-  credit: round2(rows.reduce((s, t) => s + (t.credit || 0), 0)),
-  debit: round2(rows.reduce((s, t) => s + (t.debit || 0), 0)),
-  closing: round2(closingBalance || 0),
-});
 
 // ---------- small UI atoms ----------
 const PillGroup = ({ options, value, onChange, columns = options.length, activeColor = "#215464" }) => (
@@ -164,9 +146,6 @@ export default function MilkLedger() {
   const [customers, setCustomers] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [rates, setRates] = useState({ purchase: 200, sale: 220, saleItems: DEFAULT_SALE_ITEM_RATES, purchaseMatrix: DEFAULT_PURCHASE_RATE_MATRIX });
-  const [businessProfile, setBusinessProfile] = useState(DEFAULT_BUSINESS_PROFILE);
-  const [accountSettings, setAccountSettings] = useState(DEFAULT_ACCOUNT_SETTINGS);
-  const [activityLog, setActivityLog] = useState([]);
   const [tab, setTab] = useState("dashboard");
   const [customerFlow, setCustomerFlow] = useState("purchase"); // which list is shown on Customers tab
   const [search, setSearch] = useState("");
@@ -198,10 +177,27 @@ export default function MilkLedger() {
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [dashboardFrom, setDashboardFrom] = useState("");
-  const [dashboardTo, setDashboardTo] = useState("");
   const [showAssistant, setShowAssistant] = useState(false);
   const [showSeedConfirm, setShowSeedConfirm] = useState(false);
+
+  // ---------- Account tab state ----------
+  const [accountView, setAccountView] = useState("menu"); // menu | profile | rates | backup | security | language | activity
+  const [businessProfile, setBusinessProfile] = useState({ businessName: "", ownerName: "", phone: "", address: "", regNo: "" });
+  const [profileInputs, setProfileInputs] = useState({ businessName: "", ownerName: "", phone: "", address: "", regNo: "" });
+  const [activityLog, setActivityLog] = useState([]);
+  const [security, setSecurity] = useState({ pinEnabled: false, pinHash: "", biometricEnabled: false });
+  const [locked, setLocked] = useState(false);
+  const [pinEntry, setPinEntry] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [pinSetupStep, setPinSetupStep] = useState(null); // null | "new" | "confirm" | "remove"
+  const [pinNew, setPinNew] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
+  const [biometricAvailable, setBiometricAvailable] = useState(null); // null=unchecked, true/false after check
+  const [lang, setLang] = useState("en");
+  const [autoBackup, setAutoBackup] = useState({ onEveryEntry: false, scheduled: false, scheduledTime: "20:00", lastBackupAt: null, lastAutoSnapshotAt: null });
+  const [restoreError, setRestoreError] = useState("");
+  const fileInputRef = useRef(null);
+
   const [chatMessages, setChatMessages] = useState([
     { role: "assistant", text: "Hi! Tap a quick action below, or type something like \"sold 5 ltr cow milk to Ramesh paid\"." },
   ]);
@@ -239,17 +235,30 @@ export default function MilkLedger() {
         });
       } catch { setRates({ purchase: 200, sale: 220, saleItems: DEFAULT_SALE_ITEM_RATES, purchaseMatrix: DEFAULT_PURCHASE_RATE_MATRIX }); }
       try {
-        const p = await window.storage.get("businessProfile");
-        setBusinessProfile(p ? { ...DEFAULT_BUSINESS_PROFILE, ...JSON.parse(p.value) } : DEFAULT_BUSINESS_PROFILE);
-      } catch { setBusinessProfile(DEFAULT_BUSINESS_PROFILE); }
+        const bp = await window.storage.get("businessProfile");
+        const parsedBp = bp ? JSON.parse(bp.value) : { businessName: "", ownerName: "", phone: "", address: "", regNo: "" };
+        setBusinessProfile(parsedBp);
+        setProfileInputs(parsedBp);
+      } catch {}
       try {
-        const a = await window.storage.get("accountSettings");
-        setAccountSettings(a ? { ...DEFAULT_ACCOUNT_SETTINGS, ...JSON.parse(a.value) } : DEFAULT_ACCOUNT_SETTINGS);
-      } catch { setAccountSettings(DEFAULT_ACCOUNT_SETTINGS); }
-      try {
-        const l = await window.storage.get("activityLog");
-        setActivityLog(l ? JSON.parse(l.value) : []);
+        const al = await window.storage.get("activityLog");
+        setActivityLog(al ? JSON.parse(al.value) : []);
       } catch { setActivityLog([]); }
+      try {
+        const sec = await window.storage.get("security");
+        const parsedSec = sec ? JSON.parse(sec.value) : { pinEnabled: false, pinHash: "", biometricEnabled: false };
+        setSecurity(parsedSec);
+        setLocked(!!parsedSec.pinEnabled);
+      } catch {}
+      try {
+        const l = await window.storage.get("language");
+        setLang(l ? JSON.parse(l.value) : "en");
+      } catch {}
+      try {
+        const ab = await window.storage.get("autoBackup");
+        const parsedAb = ab ? JSON.parse(ab.value) : { onEveryEntry: false, scheduled: false, scheduledTime: "20:00", lastBackupAt: null, lastAutoSnapshotAt: null };
+        setAutoBackup(parsedAb);
+      } catch {}
       setReady(true);
     })();
   }, []);
@@ -273,72 +282,41 @@ export default function MilkLedger() {
     settings: async (s) => {
       try { await window.storage.set("settings", JSON.stringify(s)); } catch {}
     },
-    businessProfile: async (profile) => {
-      setBusinessProfile(profile);
-      try { await window.storage.set("businessProfile", JSON.stringify(profile)); } catch {}
-    },
-    accountSettings: async (settings) => {
-      setAccountSettings(settings);
-      try { await window.storage.set("accountSettings", JSON.stringify(settings)); } catch {}
+    businessProfile: async (p) => {
+      setBusinessProfile(p);
+      try { await window.storage.set("businessProfile", JSON.stringify(p)); } catch {}
     },
     activityLog: async (list) => {
-      const trimmed = list.slice(0, 250);
-      setActivityLog(trimmed);
-      try { await window.storage.set("activityLog", JSON.stringify(trimmed)); } catch {}
+      try { await window.storage.set("activityLog", JSON.stringify(list)); } catch {}
     },
+    security: async (s) => {
+      setSecurity(s);
+      try { await window.storage.set("security", JSON.stringify(s)); } catch {}
+    },
+    language: async (l) => {
+      setLang(l);
+      try { await window.storage.set("language", JSON.stringify(l)); } catch {}
+    },
+    autoBackup: async (s) => {
+      setAutoBackup(s);
+      try { await window.storage.set("autoBackup", JSON.stringify(s)); } catch {}
+    },
+  };
+
+  // Records a timestamped entry for the Activity Log. Uses a functional
+  // update so rapid-fire calls (e.g. several saves in a row) never clobber
+  // each other from a stale closure.
+  const logActivity = (type, message) => {
+    setActivityLog((prev) => {
+      const next = [{ id: uid(), ts: Date.now(), type, message }, ...prev].slice(0, 500);
+      window.storage.set("activityLog", JSON.stringify(next)).catch(() => {});
+      return next;
+    });
   };
 
   const showToast = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(null), 1800);
-  };
-
-  const logActivity = async (action, detail = "") => {
-    const entry = { id: uid(), ts: Date.now(), action, detail };
-    const next = [entry, ...activityLog].slice(0, 250);
-    await persist.activityLog(next);
-  };
-
-  const buildBackupPayload = (reason = "manual") => ({
-    app: "Milk Ledger",
-    version: 2,
-    reason,
-    exportedAt: new Date().toISOString(),
-    businessProfile,
-    accountSettings,
-    customers,
-    transactions,
-    rates,
-    activityLog,
-  });
-
-  const saveLocalBackup = async (reason = "manual") => {
-    const payload = buildBackupPayload(reason);
-    const name = `milk-ledger-backup-${todayStr()}-${Date.now()}.json`;
-    const data = JSON.stringify(payload, null, 2);
-    const url = await writeCacheFile(name, data, Encoding.UTF8);
-    await logActivity("Backup created", reason);
-    return { name, data, url };
-  };
-
-  const shareBackup = async (target = "Local") => {
-    try {
-      const { url } = await saveLocalBackup(target);
-      await Share.share({
-        title: `Milk Ledger ${target} Backup`,
-        text: `Milk Ledger backup for ${target}. Choose ${target === "Google Drive" ? "Drive" : target === "OneDrive" ? "OneDrive" : "where to save it"} from the share options.`,
-        url,
-        dialogTitle: `Save backup to ${target}`,
-      });
-      showToast(`${target} backup ready`);
-    } catch {
-      showToast("Backup share failed");
-    }
-  };
-
-  const maybeAutoBackup = async (reason) => {
-    if (accountSettings.autoBackup !== "Every entry") return;
-    try { await saveLocalBackup(reason); } catch {}
   };
 
   const addCustomer = async () => {
@@ -347,41 +325,41 @@ export default function MilkLedger() {
     const ob = parseFloat(newCustomerOpeningBalance);
     const c = { id: uid(), name, phone: newCustomerPhone.trim(), flow: customerFlow, openingBalance: isNaN(ob) ? 0 : ob };
     await persist.customers([c, ...customers]);
-    await logActivity("Party added", `${name} (${FLOW_META[customerFlow].noun})`);
     setNewCustomerName("");
     setNewCustomerPhone("");
     setNewCustomerOpeningBalance("0");
     setShowAddCustomer(false);
     showToast(`${name} added as ${FLOW_META[customerFlow].noun.toLowerCase()}`);
+    logActivity("customer", `Added ${FLOW_META[customerFlow].noun.toLowerCase()}: ${name}`);
   };
 
   const updateCustomerBalance = async (customerId, newBalance) => {
     const list = customers.map((c) => (c.id === customerId ? { ...c, openingBalance: newBalance } : c));
     await persist.customers(list);
-    await logActivity("Opening balance updated", `${customerById(customerId)?.name || "Party"}: ${currency(newBalance)}`);
     if (viewingParty?.id === customerId) setViewingParty((v) => ({ ...v, openingBalance: newBalance }));
     showToast(`Previous balance set to ₹${round2(newBalance)}`);
+    logActivity("customer", `Set previous balance for ${customerById(customerId)?.name || "party"} to ₹${round2(newBalance)}`);
   };
 
   const saveTransaction = async (txn) => {
     await persist.transactions([txn, ...transactions]);
-    await logActivity("Transaction added", `${customerById(txn.customerId)?.name || "Unknown"} ${currency(txn.amount)}`);
-    await maybeAutoBackup("entry-added");
+    logActivity("transaction", `Logged ${txn.kind === "money" ? "money" : "milk/item"} entry ₹${round2(txn.amount)} for ${customerById(txn.customerId)?.name || "party"} (${STATUS_META[txn.status].label})`);
+    maybeAutoBackupSnapshot();
   };
 
   const updateTransaction = async (txn) => {
     await persist.transactions(transactions.map((t) => (t.id === txn.id ? txn : t)));
-    await logActivity("Transaction updated", `${customerById(txn.customerId)?.name || "Unknown"} ${currency(txn.amount)}`);
-    await maybeAutoBackup("entry-updated");
+    logActivity("transaction", `Edited entry ₹${round2(txn.amount)} for ${customerById(txn.customerId)?.name || "party"}`);
+    maybeAutoBackupSnapshot();
   };
 
   const deleteTransaction = async (id) => {
-    const target = transactions.find((t) => t.id === id);
+    const txn = transactions.find((t) => t.id === id);
     await persist.transactions(transactions.filter((t) => t.id !== id));
-    if (target) await logActivity("Transaction deleted", `${customerById(target.customerId)?.name || "Unknown"} ${currency(target.amount)}`);
-    await maybeAutoBackup("entry-deleted");
     setDeleteTarget(null);
     showToast("Transaction deleted");
+    logActivity("transaction", `Deleted ₹${round2(txn?.amount || 0)} entry for ${customerById(txn?.customerId)?.name || "party"}`);
+    maybeAutoBackupSnapshot();
   };
 
   const customerById = (id) => customers.find((c) => c.id === id);
@@ -494,6 +472,7 @@ export default function MilkLedger() {
     await persist.transactions([...newTxns, ...transactions]);
     setShowSeedConfirm(false);
     showToast("Demo data added: 10 parties, 100 transactions");
+    logActivity("system", "Loaded demo data: 10 parties, 100 transactions");
   };
 
   const handleSaveTxn = async (txn) => {
@@ -513,9 +492,9 @@ export default function MilkLedger() {
     const next = { ...rates, purchase: p };
     setRates(next);
     await persist.settings(next);
-    await logActivity("Purchase fallback rate updated", currency(p));
     setTimeout(() => setSavingRate(false), 600);
     showToast("Purchase rate updated");
+    logActivity("settings", `Fallback purchase rate updated to ₹${p}`);
   };
 
   const saveSaleItemRates = async () => {
@@ -528,8 +507,8 @@ export default function MilkLedger() {
     const next = { ...rates, saleItems: { ...rates.saleItems, ...parsed } };
     setRates(next);
     await persist.settings(next);
-    await logActivity("Sale item rates updated");
     showToast("Item rates updated");
+    logActivity("settings", "Sale item rates updated");
   };
 
   const savePurchaseMatrix = async () => {
@@ -548,9 +527,195 @@ export default function MilkLedger() {
     const next = { ...rates, purchaseMatrix: nextMatrix };
     setRates(next);
     await persist.settings(next);
-    await logActivity("Purchase matrix updated");
     showToast("Purchase rates updated");
+    logActivity("settings", "Purchase rate matrix updated");
   };
+
+  // ---------- Language ----------
+  const t = (key) => TRANSLATIONS[lang]?.[key] ?? TRANSLATIONS.en[key] ?? key;
+  const changeLanguage = async (code) => {
+    await persist.language(code);
+    logActivity("settings", `Language changed to ${LANGUAGES.find((l) => l.code === code)?.label}`);
+  };
+
+  // ---------- Business Profile ----------
+  const saveBusinessProfile = async () => {
+    await persist.businessProfile(profileInputs);
+    showToast("Business profile saved");
+    logActivity("settings", "Business profile updated");
+  };
+
+  // ---------- Backup & Restore ----------
+  // "Backup" builds a single JSON snapshot of everything and hands it to the
+  // device's native share sheet (same mechanism as the statement Share
+  // buttons) — on most phones that share sheet already includes Google
+  // Drive, OneDrive, email, WhatsApp, etc. as destinations, plus a plain
+  // download if the person just wants the file locally. There's no direct
+  // Drive/OneDrive API integration here — that would need a registered app
+  // with Google/Microsoft — but this reaches the same places in practice.
+  const buildBackupPayload = () => ({
+    app: "MilkLedger",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    customers,
+    transactions,
+    rates,
+    businessProfile,
+  });
+
+  const downloadBackupFile = async () => {
+    const payload = buildBackupPayload();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    await shareBlobAsFile(blob, `milk_ledger_backup_${todayStr()}.json`, "Milk Ledger Backup");
+    const next = { ...autoBackup, lastBackupAt: Date.now() };
+    await persist.autoBackup(next);
+    logActivity("backup", "Manual backup created");
+  };
+
+  const [pendingRestore, setPendingRestore] = useState(null);
+
+  const handleRestoreFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRestoreError("");
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data || !Array.isArray(data.customers) || !Array.isArray(data.transactions)) {
+        throw new Error("not a backup file");
+      }
+      setPendingRestore(data);
+    } catch {
+      setRestoreError("Couldn't read that file — make sure it's a Milk Ledger backup JSON.");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const confirmRestore = async () => {
+    const data = pendingRestore;
+    if (!data) return;
+    await persist.customers(data.customers);
+    await persist.transactions(data.transactions);
+    if (data.rates) { setRates(data.rates); await persist.settings(data.rates); }
+    if (data.businessProfile) { await persist.businessProfile(data.businessProfile); }
+    setPendingRestore(null);
+    showToast("Backup restored");
+    logActivity("backup", `Restored backup from ${data.exportedAt ? fmtDate(data.exportedAt.slice(0, 10)) : "file"}`);
+  };
+
+  // ---------- Auto-backup ----------
+  // "On every entry" keeps a fresh local JSON snapshot in storage after each
+  // save — real and automatic, but local-only (silently pushing to a cloud
+  // service on every save isn't possible without a signed-in cloud API, and
+  // triggering the share sheet on every single entry would be disruptive).
+  // "Scheduled" is an honest reminder system: it nudges you at your chosen
+  // time if you haven't backed up yet that day, rather than claiming to
+  // upload silently in the background.
+  const maybeAutoBackupSnapshot = () => {
+    if (!autoBackup.onEveryEntry) return;
+    const payload = buildBackupPayload();
+    window.storage.set("autoBackupSnapshot", JSON.stringify(payload)).catch(() => {});
+  };
+
+  const saveAutoBackupSettings = async (patch) => {
+    const next = { ...autoBackup, ...patch };
+    await persist.autoBackup(next);
+    logActivity("settings", "Auto-backup settings updated");
+  };
+
+  // ---------- Security / PIN lock ----------
+  // Uses the browser's native SHA-256 (window.crypto.subtle) so the PIN
+  // itself is never stored — only its hash. This is a practical local-device
+  // lock (keeps a casual snooper out), not a server-verified auth system —
+  // there's no backend here for a real JWT to authenticate against.
+  const hashPin = async (pin) => {
+    const enc = new TextEncoder().encode(pin);
+    const buf = await crypto.subtle.digest("SHA-256", enc);
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
+
+  const startSetPin = () => { setPinSetupStep("new"); setPinNew(""); setPinConfirm(""); setPinError(""); };
+
+  const submitNewPin = () => {
+    if (pinNew.length < 4) { setPinError("PIN must be at least 4 digits"); return; }
+    setPinError("");
+    setPinSetupStep("confirm");
+  };
+
+  const submitConfirmPin = async () => {
+    if (pinConfirm !== pinNew) {
+      setPinError("PINs didn't match — try again");
+      setPinSetupStep("new");
+      setPinNew("");
+      setPinConfirm("");
+      return;
+    }
+    const hash = await hashPin(pinNew);
+    const next = { ...security, pinEnabled: true, pinHash: hash };
+    await persist.security(next);
+    setPinSetupStep(null);
+    setPinNew("");
+    setPinConfirm("");
+    setPinError("");
+    showToast("PIN lock enabled");
+    logActivity("security", "PIN lock enabled");
+  };
+
+  const removePin = async () => {
+    const next = { pinEnabled: false, pinHash: "", biometricEnabled: false };
+    await persist.security(next);
+    showToast("PIN lock removed");
+    logActivity("security", "PIN lock removed");
+  };
+
+  const attemptUnlock = async () => {
+    const hash = await hashPin(pinEntry);
+    if (hash === security.pinHash) {
+      setLocked(false);
+      setPinEntry("");
+      setPinError("");
+      logActivity("security", "App unlocked with PIN");
+    } else {
+      setPinError("Incorrect PIN");
+      setPinEntry("");
+    }
+  };
+
+  const checkBiometricAvailability = async () => {
+    try {
+      if (window.PublicKeyCredential && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) {
+        const avail = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+        setBiometricAvailable(avail);
+        showToast(avail ? "Biometric hardware detected on this device" : "No biometric hardware detected here");
+      } else {
+        setBiometricAvailable(false);
+        showToast("Biometric check isn't supported in this browser");
+      }
+    } catch {
+      setBiometricAvailable(false);
+      showToast("Couldn't check biometric support");
+    }
+  };
+
+  // Reminds (doesn't silently act) when a scheduled backup time has passed
+  // and no backup has been taken yet today.
+  useEffect(() => {
+    if (!ready || !autoBackup.scheduled) return;
+    const check = () => {
+      const now = new Date();
+      const [h, m] = (autoBackup.scheduledTime || "20:00").split(":").map(Number);
+      const scheduledToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h || 0, m || 0);
+      const lastBackup = autoBackup.lastBackupAt ? new Date(autoBackup.lastBackupAt) : null;
+      const backedUpToday = lastBackup && lastBackup.toDateString() === now.toDateString();
+      if (now >= scheduledToday && !backedUpToday) {
+        showToast("⏰ Scheduled backup time — open Account → Backup to back up now");
+      }
+    };
+    check();
+    const interval = setInterval(check, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [ready, autoBackup.scheduled, autoBackup.scheduledTime, autoBackup.lastBackupAt]);
 
   const filteredCustomers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -562,10 +727,7 @@ export default function MilkLedger() {
   const today = todayStr();
   const dashboard = useMemo(() => {
     const withFlow = transactions.map((t) => ({ ...t, flow: customerById(t.customerId)?.flow || "purchase" }));
-    const hasRange = !!(dashboardFrom || dashboardTo);
-    const periodRows = hasRange
-      ? withFlow.filter((t) => (!dashboardFrom || t.date >= dashboardFrom) && (!dashboardTo || t.date <= dashboardTo))
-      : withFlow.filter((t) => t.date === today);
+    const todays = withFlow.filter((t) => t.date === today);
 
     const sums = (list) => ({
       ltr: round2(list.reduce((s, t) => s + (t.kind === "money" ? 0 : (t.qty || 0)), 0)),
@@ -573,11 +735,11 @@ export default function MilkLedger() {
       count: list.length,
     });
     // Milk volume/value stats should reflect actual milk trade, not money settlements
-    const todayPurchase = sums(periodRows.filter((t) => t.flow === "purchase" && t.kind !== "money"));
-    const todaySale = sums(periodRows.filter((t) => t.flow === "sale" && t.kind !== "money"));
+    const todayPurchase = sums(todays.filter((t) => t.flow === "purchase" && t.kind !== "money"));
+    const todaySale = sums(todays.filter((t) => t.flow === "sale" && t.kind !== "money"));
 
     const byStatus = { paid: 0, credit: 0, debit: 0 };
-    periodRows.forEach((t) => { byStatus[t.status] = (byStatus[t.status] || 0) + t.amount; });
+    withFlow.forEach((t) => { byStatus[t.status] = (byStatus[t.status] || 0) + t.amount; });
 
     const days = [...Array(7)].map((_, i) => {
       const d = new Date();
@@ -590,7 +752,7 @@ export default function MilkLedger() {
     });
 
     const duesByCustomer = {};
-    periodRows.forEach((t) => {
+    withFlow.forEach((t) => {
       if (t.status !== "paid") {
         const key = t.customerId;
         duesByCustomer[key] = duesByCustomer[key] || { amt: 0, flow: t.flow };
@@ -602,8 +764,8 @@ export default function MilkLedger() {
       .sort((a, b) => b.amt - a.amt)
       .slice(0, 5);
 
-    return { todayPurchase, todaySale, byStatus, days, topDebtors, outstanding: byStatus.credit + byStatus.debit, netToday: round2(todaySale.amt - todayPurchase.amt), hasRange };
-  }, [transactions, customers, today, dashboardFrom, dashboardTo]);
+    return { todayPurchase, todaySale, byStatus, days, topDebtors, outstanding: byStatus.credit + byStatus.debit, netToday: round2(todaySale.amt - todayPurchase.amt) };
+  }, [transactions, customers, today]);
 
   const historyList = useMemo(() => {
     let list = transactions.map((t) => ({ ...t, flow: customerById(t.customerId)?.flow || "purchase" }));
@@ -611,6 +773,11 @@ export default function MilkLedger() {
     if (historyFilter !== "all") list = list.filter((t) => t.customerId === historyFilter);
     return list;
   }, [transactions, historyFilter, historyFlowFilter, customers]);
+
+  const historyRows = useMemo(
+    () => historyList.map((t) => ({ ...t, customerName: customerById(t.customerId)?.name })),
+    [historyList, customers]
+  );
 
   const srNoMap = useMemo(() => {
     const sorted = [...transactions].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
@@ -673,68 +840,49 @@ export default function MilkLedger() {
     };
   }, [transactions, viewingParty, dateFrom, dateTo]);
 
-  const buildStatementShareText = () => {
-    const rangeText = statementRangeText(dateFrom, dateTo);
-    const detailedRows = statementRowsWithBalance(partyStatement.rows, partyStatement.opening);
-    const totals = statementTotals(detailedRows, partyStatement.balance);
-    const lines = [
-      `${businessProfile.name.toUpperCase()} - ACCOUNT STATEMENT`,
-      businessProfile.subtitle,
-      "",
-      "BUSINESS PROFILE",
-      `Name: ${businessProfile.name}`,
-      `Phone: ${businessProfile.phone}`,
-      `Address: ${businessProfile.address}`,
-      "",
-      "CUSTOMER PROFILE",
-      `Name: ${viewingParty.name}`,
-      `Phone: ${viewingParty.phone || "Not provided"}`,
-      `Type: ${FLOW_META[viewingParty.flow].label} ${FLOW_META[viewingParty.flow].noun}`,
-      `Statement Period: ${rangeText}`,
-      `Generated On: ${fmtDate(todayStr())}`,
-      "",
-      "SUMMARY",
-      `Opening Balance: ${currency(partyStatement.opening)}`,
-      `Total Paid/Settled: ${currency(detailedRows.reduce((s, t) => s + t.paid, 0))}`,
-      `Total Credit: ${currency(partyStatement.credit)}`,
-      `Total Debit/Udhaar: ${currency(partyStatement.debit)}`,
-      `Closing Balance: ${currency(partyStatement.balance)}`,
-      "",
-      "TRANSACTION DETAILS",
-      "Date | Particulars | Units | Paid | Credit | Debit | Balance",
-    ];
-
-    if (detailedRows.length === 0) {
-      lines.push("No transactions in this period.");
-    } else {
-      detailedRows.forEach((t) => {
-        lines.push([
-          fmtDate(t.date),
-          transactionDescription(t),
-          transactionUnits(t),
-          t.paid ? currency(t.paid) : "-",
-          t.credit ? currency(t.credit) : "-",
-          t.debit ? currency(t.debit) : "-",
-          currency(t.runningBalance),
-        ].join(" | "));
-      });
-      lines.push([
-        "TOTAL",
-        "All transactions",
-        `${totals.qty} L / ${currency(totals.amount)}`,
-        totals.paid ? currency(totals.paid) : "-",
-        totals.credit ? currency(totals.credit) : "-",
-        totals.debit ? currency(totals.debit) : "-",
-        currency(totals.closing),
-      ].join(" | "));
+  // ---------- Generic export helpers (usable from Statement, History, Dashboard) ----------
+  const buildCsvLines = (rows, { previousBalance, totals } = {}) => {
+    const headers = ["Sr No", "Date", "Time", "Party", "Shift", "Item", "Type", "Qty", "Rate", "Amount", "Status", "Credit", "Debit", "Note"];
+    const esc = (v) => {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [headers.join(",")];
+    if (previousBalance != null) {
+      lines.push(["", "", "", "", "", "Previous Balance", "", "", "", previousBalance, "", "", "", ""].map(esc).join(","));
     }
-
-    lines.push("");
-    lines.push("DETAILS");
-    lines.push("Paid entries are settled immediately and do not change closing balance.");
-    lines.push("Closing Balance = Opening Balance + Credit - Debit/Udhaar.");
-    lines.push("This statement is generated from Milk Ledger app records.");
-    return lines.join("\n");
+    rows.forEach((t) => {
+      const isMoney = t.kind === "money";
+      const isItem = t.kind === "item";
+      lines.push(
+        [
+          srNoMap[t.id],
+          t.date,
+          fmtTime(t.createdAt),
+          t.customerName || "",
+          isMoney ? "" : t.shift || "",
+          isMoney ? "Money" : isItem ? t.itemName : t.category,
+          isMoney || isItem ? "" : t.type,
+          isMoney ? "" : t.qty,
+          isMoney ? "" : t.rate,
+          round2(t.amount),
+          STATUS_META[t.status].label,
+          t.status === "credit" ? round2(t.amount) : "",
+          t.status === "debit" ? round2(t.amount) : "",
+          t.note || "",
+        ].map(esc).join(",")
+      );
+    });
+    if (totals) {
+      lines.push("");
+      if (previousBalance != null) lines.push(`Previous Balance,,${previousBalance}`);
+      lines.push(`Total Qty,,${totals.qty}`);
+      lines.push(`Total Amount,,${totals.amount}`);
+      lines.push(`Total Credit,,${totals.credit}`);
+      lines.push(`Total Debit,,${totals.debit}`);
+      if (totals.balance != null) lines.push(`Balance (Credit - Debit + Previous),,${totals.balance}`);
+    }
+    return lines;
   };
 
   const shareNativeText = async (title, text) => {
@@ -744,11 +892,6 @@ export default function MilkLedger() {
     } catch {
       return false;
     }
-  };
-
-  const safeStatementFilename = (ext) => {
-    const rangeTag = dateFrom || dateTo ? `_${dateFrom || "start"}_to_${dateTo || "today"}` : "";
-    return `${viewingParty.name.replace(/[^\w-]+/g, "_")}${rangeTag}_statement.${ext}`;
   };
 
   const blobToBase64 = (blob) => new Promise((resolve, reject) => {
@@ -770,7 +913,7 @@ export default function MilkLedger() {
     return uri.uri;
   };
 
-  const shareFile = async ({ title, text, path, data, encoding }) => {
+  const shareNativeFile = async ({ title, text, path, data, encoding }) => {
     try {
       const url = await writeCacheFile(path, data, encoding);
       await Share.share({ title, text, url, dialogTitle: title });
@@ -780,56 +923,17 @@ export default function MilkLedger() {
     }
   };
 
-  const buildStatementCSV = () => {
-    const headers = ["Sr No", "Date", "Time", "Particulars", "Units", "Paid", "Credit", "Debit", "Balance", "Status", "Note"];
-    const esc = (v) => {
-      const s = String(v ?? "");
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = [headers.join(",")];
-    lines.push(["", "", "", "Opening Balance", "", "", "", "", partyStatement.opening, "", ""].map(esc).join(","));
-    const detailedRows = statementRowsWithBalance(partyStatement.rows, partyStatement.opening);
-    detailedRows.forEach((t) => {
-      lines.push(
-        [
-          srNoMap[t.id],
-          t.date,
-          fmtTime(t.createdAt),
-          transactionDescription(t),
-          transactionUnits(t),
-          t.paid || "",
-          t.credit || "",
-          t.debit || "",
-          t.runningBalance,
-          STATUS_META[t.status].label,
-          t.note || "",
-        ].map(esc).join(",")
-      );
-    });
-    const totals = statementTotals(detailedRows, partyStatement.balance);
-    lines.push(["", "", "", "TOTAL", `${totals.qty} L / ${totals.amount}`, totals.paid, totals.credit, totals.debit, totals.closing, "", ""].map(esc).join(","));
-    lines.push("");
-    lines.push(`Previous Balance,,${partyStatement.opening}`);
-    lines.push(`Total Qty,,${partyStatement.qty}`);
-    lines.push(`Total Amount,,${partyStatement.amount}`);
-    lines.push(`Total Credit,,${partyStatement.credit}`);
-    lines.push(`Total Debit,,${partyStatement.debit}`);
-    lines.push(`Balance (Credit - Debit + Previous),,${partyStatement.balance}`);
-    return lines.join("\n");
-  };
-
-  const exportPartyCSV = async () => {
-    const csv = buildStatementCSV();
-    const filename = safeStatementFilename("csv");
-    if (await shareFile({
-      title: `${viewingParty.name} CSV Statement`,
-      text: "CSV statement generated from Milk Ledger.",
+  const downloadCSV = async (rows, filename, opts) => {
+    const csvText = buildCsvLines(rows, opts).join("\n");
+    if (await shareNativeFile({
+      title: filename,
+      text: "CSV export generated from Milk Ledger.",
       path: filename,
-      data: csv,
+      data: csvText,
       encoding: Encoding.UTF8,
     })) return;
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -841,458 +945,311 @@ export default function MilkLedger() {
     showToast("CSV exported");
   };
 
-  const generateStatementPdfBase64 = () => {
-    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-    const rows = statementRowsWithBalance(partyStatement.rows, partyStatement.opening);
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const margin = 34;
-    const flowColor = FLOW_META[viewingParty.flow].color;
-    const rangeLabel = statementRangeText(dateFrom, dateTo);
-    const paidTotal = rows.reduce((s, t) => s + t.paid, 0);
-    const totals = statementTotals(rows, partyStatement.balance);
-    let y = 0;
-
-    const hexToRgb = (hex) => {
-      const n = parseInt(hex.replace("#", ""), 16);
-      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-    };
-    const setColor = (hex) => doc.setTextColor(...hexToRgb(hex));
-    const line = (x1, y1, x2, y2, color = "#e2e8f0") => {
-      doc.setDrawColor(...hexToRgb(color));
-      doc.line(x1, y1, x2, y2);
-    };
-    const addHeader = () => {
-      doc.setFillColor(15, 23, 42);
-      doc.rect(0, 0, pageW, 84, "F");
-      doc.setFillColor(...hexToRgb(flowColor));
-      doc.rect(0, 78, pageW, 6, "F");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(22);
-      doc.setTextColor(255, 255, 255);
-      doc.text(businessProfile.name, margin, 32);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(203, 213, 225);
-      doc.text(businessProfile.subtitle, margin, 50);
-      doc.text(businessProfile.phone, margin, 65);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(18);
-      doc.setTextColor(255, 255, 255);
-      doc.text("ACCOUNT STATEMENT", pageW - margin, 32, { align: "right" });
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(203, 213, 225);
-      doc.text(`Period: ${rangeLabel}`, pageW - margin, 50, { align: "right" });
-      doc.text(`Generated: ${fmtDate(todayStr())}`, pageW - margin, 65, { align: "right" });
-      y = 112;
-    };
-    const addPageIfNeeded = (needed = 28) => {
-      if (y + needed < pageH - 48) return;
-      doc.addPage();
-      addHeader();
-    };
-
-    addHeader();
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    setColor("#64748b");
-    doc.text("BUSINESS PROFILE", margin, y);
-    doc.text("CUSTOMER PROFILE", pageW / 2, y);
-    y += 18;
-    doc.setFontSize(13);
-    setColor("#0f172a");
-    doc.text(businessProfile.name, margin, y);
-    doc.text(viewingParty.name, pageW / 2, y);
-    y += 16;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    setColor("#475569");
-    doc.text(businessProfile.address, margin, y);
-    doc.text(`Phone: ${viewingParty.phone || "Not provided"}`, pageW / 2, y);
-    y += 14;
-    doc.text(businessProfile.phone, margin, y);
-    doc.text(`Type: ${FLOW_META[viewingParty.flow].label} ${FLOW_META[viewingParty.flow].noun}`, pageW / 2, y);
-    y += 28;
-
-    const summary = [
-      ["Opening", currency(partyStatement.opening)],
-      ["Paid", currency(paidTotal)],
-      ["Credit", currency(partyStatement.credit)],
-      ["Debit", currency(partyStatement.debit)],
-      ["Closing", currency(partyStatement.balance)],
-    ];
-    const boxW = (pageW - margin * 2 - 32) / 5;
-    summary.forEach(([label, value], i) => {
-      const x = margin + i * (boxW + 8);
-      doc.setDrawColor(226, 232, 240);
-      doc.rect(x, y, boxW, 46);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
-      setColor("#64748b");
-      doc.text(label.toUpperCase(), x + 8, y + 16);
-      doc.setFontSize(12);
-      setColor(i === 4 ? flowColor : "#0f172a");
-      doc.text(value, x + 8, y + 34);
-    });
-    y += 68;
-
-    const cols = [
-      ["Date", 70], ["Particulars", 210], ["Units", 105],
-      ["Paid", 70], ["Credit", 74], ["Debit", 74], ["Balance", 82],
-    ];
-    const drawTableHeader = () => {
-      doc.setFillColor(241, 245, 249);
-      doc.rect(margin, y, pageW - margin * 2, 24, "F");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
-      setColor("#475569");
-      let x = margin + 8;
-      cols.forEach(([label, w], idx) => {
-        doc.text(label, idx >= 3 ? x + w - 8 : x, y + 16, idx >= 3 ? { align: "right" } : {});
-        x += w;
-      });
-      y += 24;
-    };
-    drawTableHeader();
-
-    if (!rows.length) {
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      setColor("#64748b");
-      doc.text("No transactions in this statement period.", margin + 8, y + 18);
-      y += 28;
-    } else {
-      rows.forEach((t) => {
-        addPageIfNeeded(34);
-        if (y < 130) drawTableHeader();
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
-        setColor("#334155");
-        let x = margin + 8;
-        const values = [
-          fmtDate(t.date).replace(/ \d{4}$/, ""),
-          transactionDescription(t),
-          transactionUnits(t),
-          t.paid ? currency(t.paid) : "-",
-          t.credit ? currency(t.credit) : "-",
-          t.debit ? currency(t.debit) : "-",
-          currency(t.runningBalance),
-        ];
-        values.forEach((v, idx) => {
-          const w = cols[idx][1];
-          const text = idx === 1 ? doc.splitTextToSize(v, w - 10).slice(0, 2) : v;
-          doc.text(text, idx >= 3 ? x + w - 8 : x, y + 16, idx >= 3 ? { align: "right" } : {});
-          x += w;
-        });
-        line(margin, y + 30, pageW - margin, y + 30);
-        y += 30;
-      });
-    }
-
-    addPageIfNeeded(34);
-    doc.setFillColor(248, 250, 252);
-    doc.rect(margin, y, pageW - margin * 2, 30, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    setColor("#0f172a");
-    let totalX = margin + 8;
-    doc.text("TOTAL", totalX, y + 19);
-    totalX += cols[0][1];
-    doc.text("All transactions", totalX, y + 19);
-    totalX += cols[1][1];
-    doc.text(`${totals.qty} L / ${currency(totals.amount)}`, totalX, y + 19);
-    totalX += cols[2][1];
-    doc.text(totals.paid ? currency(totals.paid) : "-", totalX + cols[3][1] - 8, y + 19, { align: "right" });
-    totalX += cols[3][1];
-    doc.text(totals.credit ? currency(totals.credit) : "-", totalX + cols[4][1] - 8, y + 19, { align: "right" });
-    totalX += cols[4][1];
-    doc.text(totals.debit ? currency(totals.debit) : "-", totalX + cols[5][1] - 8, y + 19, { align: "right" });
-    totalX += cols[5][1];
-    doc.text(currency(totals.closing), totalX + cols[6][1] - 8, y + 19, { align: "right" });
-    y += 34;
-
-    addPageIfNeeded(66);
-    y += 16;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    setColor("#0f172a");
-    doc.text("Detailed Notes", margin, y);
-    y += 16;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    setColor("#475569");
-    doc.text("Paid entries are settled immediately and do not change the closing balance.", margin, y);
-    y += 14;
-    doc.text("Closing Balance = Opening Balance + Credit - Debit/Udhaar.", margin, y);
-    y += 14;
-    doc.text("This statement is generated from Milk Ledger app records.", margin, y);
-    return doc.output("datauristring").split(",")[1];
-  };
-
-  const shareStatementPdf = async () => {
-    const filename = safeStatementFilename("pdf");
-    const data = generateStatementPdfBase64();
-    if (await shareFile({
-      title: `${viewingParty.name} PDF Statement`,
-      text: "PDF statement generated from Milk Ledger.",
-      path: filename,
-      data,
-    })) return;
-    showToast("PDF share failed");
-  };
-
-  // ---------- Statement-as-image generator ----------
-  const generateStatementImageBlob = () => {
+  // Draws a table (header, optional Previous Balance row, transaction rows,
+  // optional totals) onto a <canvas> and exports it as a JPEG — no external
+  // library needed. This is what makes "share as image" possible; there's no
+  // PDF-generation library available in this sandbox, so PDF stays covered by
+  // Print → Save as PDF.
+  const generateTableImageBlob = (rows, { title, subtitle, showParty, previousBalance, totals, flowColorHex }) => {
     return new Promise((resolve) => {
-      const rows = statementRowsWithBalance(partyStatement.rows, partyStatement.opening);
       const scale = 2;
-      const width = 1120;
-      const pad = 44;
-      const headerH = 154;
-      const profileH = 156;
-      const summaryH = 106;
-      const tableHeaderH = 40;
-      const rowH = 42;
-      const footerH = 150;
-      const height = headerH + profileH + summaryH + tableHeaderH + (Math.max(rows.length, 1) + 1) * rowH + footerH + pad;
+      const pad = 24;
+      const headerH = 86;
+      const rowH = 30;
+      const colHeaderH = 26;
+      const flowColor = flowColorHex || "#215464";
+
+      // Full column set matching the on-screen table (minus Action, which is
+      // meaningless in a static image).
+      const cols = showParty
+        ? [
+            { key: "sr", label: "Sr", w: 26 },
+            { key: "date", label: "Date/Time", w: 66 },
+            { key: "party", label: "Party", w: 92 },
+            { key: "shift", label: "Shift", w: 56 },
+            { key: "item", label: "Item", w: 86 },
+            { key: "type", label: "Type", w: 54 },
+            { key: "qty", label: "Qty", w: 40 },
+            { key: "rate", label: "Rate", w: 48 },
+            { key: "amount", label: "Amount", w: 62 },
+            { key: "status", label: "Status", w: 52 },
+            { key: "credit", label: "Credit", w: 54 },
+            { key: "debit", label: "Debit", w: 54 },
+            { key: "note", label: "Note", w: 80 },
+          ]
+        : [
+            { key: "sr", label: "Sr", w: 28 },
+            { key: "date", label: "Date/Time", w: 70 },
+            { key: "shift", label: "Shift", w: 60 },
+            { key: "item", label: "Item", w: 96 },
+            { key: "type", label: "Type", w: 58 },
+            { key: "qty", label: "Qty", w: 44 },
+            { key: "rate", label: "Rate", w: 52 },
+            { key: "amount", label: "Amount", w: 68 },
+            { key: "status", label: "Status", w: 56 },
+            { key: "credit", label: "Credit", w: 58 },
+            { key: "debit", label: "Debit", w: 58 },
+            { key: "note", label: "Note", w: 90 },
+          ];
+
+      // Precompute each column's x start so spanning text (Previous Balance /
+      // TOTAL labels) can be placed precisely without a real colSpan.
+      let cum = 0;
+      const colX = cols.map((c) => { const x = cum; cum += c.w; return x; });
+      const tableW = cum;
+      const width = tableW + pad * 2;
+      const idx = (key) => cols.findIndex((c) => c.key === key);
+
+      const prevRowCount = previousBalance != null ? 1 : 0;
+      const totalRowCount = totals ? 1 : 0;
+      const bodyRows = rows.length + prevRowCount + totalRowCount;
+      const height = headerH + colHeaderH + bodyRows * rowH + pad;
+
       const canvas = document.createElement("canvas");
       canvas.width = width * scale;
       canvas.height = height * scale;
       const ctx = canvas.getContext("2d");
       ctx.scale(scale, scale);
 
-      const flowColor = FLOW_META[viewingParty.flow].color;
       const tableX = pad;
-      const tableW = width - pad * 2;
-      const rangeLabel = statementRangeText(dateFrom, dateTo);
-      const paidTotal = rows.reduce((s, t) => s + t.paid, 0);
-      const totals = statementTotals(rows, partyStatement.balance);
-      const cols = [
-        { label: "DATE", w: 108 },
-        { label: "PARTICULARS", w: 300 },
-        { label: "UNITS", w: 150 },
-        { label: "PAID", w: 110, align: "right" },
-        { label: "CREDIT", w: 116, align: "right" },
-        { label: "DEBIT", w: 116, align: "right" },
-        { label: "BALANCE", w: 126, align: "right" },
-      ];
-
-      const drawText = (text, x, y, maxWidth, lineHeight = 16, maxLines = 2) => {
-        const words = String(text || "").split(/\s+/);
-        const wrapped = [];
-        let line = "";
-        words.forEach((word) => {
-          const test = line ? `${line} ${word}` : word;
-          if (ctx.measureText(test).width <= maxWidth) line = test;
-          else {
-            if (line) wrapped.push(line);
-            line = word;
-          }
-        });
-        if (line) wrapped.push(line);
-        wrapped.slice(0, maxLines).forEach((l, i) => {
-          ctx.fillText(l + (i === maxLines - 1 && wrapped.length > maxLines ? "..." : ""), x, y + i * lineHeight);
-        });
-      };
-      const rightText = (text, x, y) => {
-        ctx.textAlign = "right";
-        ctx.fillText(text, x, y);
-        ctx.textAlign = "left";
-      };
 
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, width, height);
-      ctx.fillStyle = "#0f172a";
-      ctx.fillRect(0, 0, width, headerH);
+
       ctx.fillStyle = flowColor;
-      ctx.fillRect(0, headerH - 8, width, 8);
+      ctx.fillRect(0, 0, width, headerH);
       ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 34px sans-serif";
-      ctx.fillText(businessProfile.name, pad, 52);
-      ctx.font = "14px sans-serif";
-      ctx.fillStyle = "#cbd5e1";
-      ctx.fillText(businessProfile.subtitle, pad, 78);
-      ctx.fillText(businessProfile.address, pad, 102);
-      ctx.fillText(businessProfile.phone, pad, 124);
-      ctx.textAlign = "right";
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 26px sans-serif";
-      ctx.fillText("ACCOUNT STATEMENT", width - pad, 52);
-      ctx.font = "13px sans-serif";
-      ctx.fillStyle = "#cbd5e1";
-      ctx.fillText(`Period: ${rangeLabel}`, width - pad, 82);
-      ctx.fillText(`Generated: ${fmtDate(todayStr())}`, width - pad, 106);
-      ctx.textAlign = "left";
+      ctx.font = "bold 18px sans-serif";
+      ctx.fillText(title, pad, 30);
+      ctx.font = "12px sans-serif";
+      ctx.fillText(subtitle, pad, 52);
+      ctx.font = "11px sans-serif";
+      ctx.fillText(`Generated ${fmtDate(todayStr())}`, pad, 70);
 
-      let y = headerH + 26;
-      ctx.fillStyle = "#f8fafc";
-      ctx.fillRect(pad, y, tableW, profileH - 28);
-      ctx.strokeStyle = "#e2e8f0";
-      ctx.strokeRect(pad, y, tableW, profileH - 28);
-      ctx.fillStyle = "#64748b";
-      ctx.font = "bold 12px sans-serif";
-      ctx.fillText("BUSINESS PROFILE", pad + 18, y + 28);
-      ctx.fillText("CUSTOMER PROFILE", pad + tableW / 2 + 18, y + 28);
-      ctx.fillStyle = "#0f172a";
-      ctx.font = "bold 20px sans-serif";
-      ctx.fillText(businessProfile.name, pad + 18, y + 58);
-      ctx.fillText(viewingParty.name, pad + tableW / 2 + 18, y + 58);
-      ctx.font = "13px sans-serif";
-      ctx.fillStyle = "#475569";
-      drawText(businessProfile.address, pad + 18, y + 84, tableW / 2 - 48, 17, 2);
-      ctx.fillText(businessProfile.phone, pad + 18, y + 124);
-      ctx.fillText(`Phone: ${viewingParty.phone || "Not provided"}`, pad + tableW / 2 + 18, y + 84);
-      ctx.fillText(`Type: ${FLOW_META[viewingParty.flow].label} ${FLOW_META[viewingParty.flow].noun}`, pad + tableW / 2 + 18, y + 106);
-      ctx.fillText(`Date Range: ${rangeLabel}`, pad + tableW / 2 + 18, y + 128);
-
-      y += profileH;
-      const summaryItems = [
-        ["Opening", currency(partyStatement.opening), "#334155"],
-        ["Paid", currency(paidTotal), STATUS_META.paid.color],
-        ["Credit", currency(partyStatement.credit), STATUS_META.credit.color],
-        ["Debit", currency(partyStatement.debit), STATUS_META.debit.color],
-        ["Closing", currency(partyStatement.balance), flowColor],
-      ];
-      const cardW = (tableW - 32) / summaryItems.length;
-      summaryItems.forEach(([label, value, color], i) => {
-        const x = pad + i * (cardW + 8);
-        ctx.fillStyle = "#ffffff";
-        ctx.strokeStyle = "#e2e8f0";
-        ctx.fillRect(x, y, cardW, 78);
-        ctx.strokeRect(x, y, cardW, 78);
-        ctx.fillStyle = "#64748b";
-        ctx.font = "bold 11px sans-serif";
-        ctx.fillText(label.toUpperCase(), x + 14, y + 24);
-        ctx.fillStyle = color;
-        ctx.font = "bold 19px sans-serif";
-        ctx.fillText(value, x + 14, y + 54);
-      });
-      y += summaryH;
-
+      let y = headerH + 18;
       ctx.fillStyle = "#f1f5f9";
-      ctx.fillRect(tableX, y, tableW, tableHeaderH);
+      ctx.fillRect(tableX, y - 16, tableW, colHeaderH);
       ctx.fillStyle = "#475569";
-      ctx.font = "bold 12px sans-serif";
-      let x = tableX + 14;
-      cols.forEach((c) => {
-        if (c.align === "right") rightText(c.label, x + c.w - 10, y + 25);
-        else ctx.fillText(c.label, x, y + 25);
-        x += c.w;
-      });
-      y += tableHeaderH;
+      ctx.font = "bold 8.5px sans-serif";
+      cols.forEach((c, i) => ctx.fillText(c.label, tableX + colX[i] + 3, y - 1));
+      y += rowH - 6;
 
-      if (rows.length === 0) {
-        ctx.fillStyle = "#64748b";
-        ctx.font = "14px sans-serif";
-        ctx.fillText("No transactions in this statement period.", tableX + 14, y + 26);
+      const drawLine = () => {
+        ctx.strokeStyle = "#eef2f6";
+        ctx.beginPath();
+        ctx.moveTo(tableX, y - rowH + 10);
+        ctx.lineTo(tableX + tableW, y - rowH + 10);
+        ctx.stroke();
+      };
+
+      const cell = (text, colIdx, opts = {}) => {
+        ctx.fillStyle = opts.color || "#334155";
+        ctx.font = opts.bold ? "700 9px sans-serif" : "9px sans-serif";
+        const maxChars = Math.floor(cols[colIdx].w / 4.6);
+        const s = String(text ?? "");
+        ctx.fillText(s.length > maxChars ? s.slice(0, maxChars - 1) + "…" : s, tableX + colX[colIdx] + 3, y);
+      };
+
+      if (previousBalance != null) {
+        cell("Previous Balance", idx("sr"), { bold: true, color: "#64748b" });
+        cell(`₹${previousBalance}`, idx("amount"), { bold: true, color: "#1e293b" });
         y += rowH;
-      } else {
-        rows.forEach((t, index) => {
-          if (index % 2 === 0) {
-            ctx.fillStyle = "#fbfdff";
-            ctx.fillRect(tableX, y, tableW, rowH);
-          }
-          ctx.strokeStyle = "#e2e8f0";
-          ctx.beginPath();
-          ctx.moveTo(tableX, y + rowH);
-          ctx.lineTo(tableX + tableW, y + rowH);
-          ctx.stroke();
-          ctx.font = "12px sans-serif";
-          ctx.fillStyle = "#334155";
-          x = tableX + 14;
-          ctx.fillText(fmtDate(t.date).replace(/ \d{4}$/, ""), x, y + 25);
-          x += cols[0].w;
-          drawText(transactionDescription(t), x, y + 18, cols[1].w - 12, 14, 2);
-          x += cols[1].w;
-          ctx.fillText(transactionUnits(t), x, y + 25);
-          x += cols[2].w;
-          ctx.fillStyle = STATUS_META.paid.color;
-          rightText(t.paid ? currency(t.paid) : "-", x + cols[3].w - 10, y + 25);
-          x += cols[3].w;
-          ctx.fillStyle = STATUS_META.credit.color;
-          rightText(t.credit ? currency(t.credit) : "-", x + cols[4].w - 10, y + 25);
-          x += cols[4].w;
-          ctx.fillStyle = STATUS_META.debit.color;
-          rightText(t.debit ? currency(t.debit) : "-", x + cols[5].w - 10, y + 25);
-          x += cols[5].w;
-          ctx.fillStyle = "#0f172a";
-          ctx.font = "bold 12px sans-serif";
-          rightText(currency(t.runningBalance), x + cols[6].w - 10, y + 25);
-          y += rowH;
-        });
+        drawLine();
       }
 
-      ctx.fillStyle = "#f8fafc";
-      ctx.fillRect(tableX, y, tableW, rowH);
-      ctx.strokeStyle = "#cbd5e1";
-      ctx.beginPath();
-      ctx.moveTo(tableX, y);
-      ctx.lineTo(tableX + tableW, y);
-      ctx.stroke();
-      ctx.font = "bold 12px sans-serif";
-      ctx.fillStyle = "#0f172a";
-      x = tableX + 14;
-      ctx.fillText("TOTAL", x, y + 25);
-      x += cols[0].w;
-      ctx.fillText("All transactions", x, y + 25);
-      x += cols[1].w;
-      ctx.fillText(`${totals.qty} L / ${currency(totals.amount)}`, x, y + 25);
-      x += cols[2].w;
-      ctx.fillStyle = STATUS_META.paid.color;
-      rightText(totals.paid ? currency(totals.paid) : "-", x + cols[3].w - 10, y + 25);
-      x += cols[3].w;
-      ctx.fillStyle = STATUS_META.credit.color;
-      rightText(totals.credit ? currency(totals.credit) : "-", x + cols[4].w - 10, y + 25);
-      x += cols[4].w;
-      ctx.fillStyle = STATUS_META.debit.color;
-      rightText(totals.debit ? currency(totals.debit) : "-", x + cols[5].w - 10, y + 25);
-      x += cols[5].w;
-      ctx.fillStyle = "#0f172a";
-      rightText(currency(totals.closing), x + cols[6].w - 10, y + 25);
-      y += rowH;
+      rows.forEach((t) => {
+        const isMoney = t.kind === "money";
+        const isItem = t.kind === "item";
+        const itemText = isMoney ? "Money" : isItem ? t.itemName : t.category;
+        const statusMeta = STATUS_META[t.status];
 
-      y += 22;
-      ctx.fillStyle = "#f8fafc";
-      ctx.fillRect(tableX, y, tableW, 108);
-      ctx.strokeStyle = "#e2e8f0";
-      ctx.strokeRect(tableX, y, tableW, 108);
-      ctx.fillStyle = "#0f172a";
-      ctx.font = "bold 14px sans-serif";
-      ctx.fillText("Detailed Notes", tableX + 16, y + 28);
-      ctx.font = "12px sans-serif";
-      ctx.fillStyle = "#475569";
-      ctx.fillText("Paid entries are settled immediately and do not change the closing balance.", tableX + 16, y + 52);
-      ctx.fillText("Closing Balance = Opening Balance + Credit - Debit/Udhaar.", tableX + 16, y + 74);
-      ctx.fillText("This statement is generated from Milk Ledger app records.", tableX + 16, y + 96);
+        cell(srNoMap[t.id], idx("sr"));
+        cell(`${fmtDate(t.date).replace(/ \d{4}$/, "")} ${fmtTime(t.createdAt)}`, idx("date"));
+        if (showParty) cell(t.customerName || "", idx("party"));
+        cell(isMoney ? "—" : t.shift || "—", idx("shift"));
+        cell(itemText, idx("item"));
+        cell(isMoney || isItem ? "—" : t.type, idx("type"));
+        cell(isMoney ? "—" : t.qty ?? "—", idx("qty"));
+        cell(isMoney ? "—" : `₹${t.rate}`, idx("rate"));
+        cell(`₹${round2(t.amount)}`, idx("amount"), { bold: true });
+        cell(statusMeta.label, idx("status"), { color: statusMeta.color, bold: true });
+        cell(t.status === "credit" ? `₹${round2(t.amount)}` : "—", idx("credit"), { color: STATUS_META.credit.color });
+        cell(t.status === "debit" ? `₹${round2(t.amount)}` : "—", idx("debit"), { color: STATUS_META.debit.color });
+        cell(t.note || "—", idx("note"));
+
+        y += rowH;
+        drawLine();
+      });
+
+      if (totals) {
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillRect(tableX, y - rowH + 10, tableW, rowH);
+        cell("TOTAL", idx("sr"), { bold: true, color: "#475569" });
+        cell(totals.qty, idx("qty"), { bold: true });
+        cell(`₹${totals.amount}`, idx("amount"), { bold: true });
+        cell(`₹${totals.credit}`, idx("credit"), { bold: true, color: STATUS_META.credit.color });
+        cell(`₹${totals.debit}`, idx("debit"), { bold: true, color: STATUS_META.debit.color });
+        if (totals.balance != null) {
+          ctx.fillStyle = "#94a3b8";
+          ctx.font = "7.5px sans-serif";
+          ctx.fillText("Balance", tableX + colX[idx("note")] + 3, y - 9);
+          ctx.fillStyle = flowColor;
+          ctx.font = "700 10px sans-serif";
+          ctx.fillText(`₹${totals.balance}`, tableX + colX[idx("note")] + 3, y + 2);
+        }
+      }
 
       canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.95);
     });
   };
 
-  const shareStatementImage = async () => {
-    const blob = await generateStatementImageBlob();
-    if (!blob) { showToast("Couldn't generate the image"); return; }
-    const filename = safeStatementFilename("jpg");
-    const file = new File([blob], filename, { type: "image/jpeg" });
+  const generateTablePdfBlob = (rows, { title, subtitle, showParty, previousBalance, totals }) => {
+    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 28;
+    const headerH = 86;
+    const rowH = 22;
+    const money = (value) => `Rs ${round2(value || 0)}`;
 
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: `${viewingParty.name} Statement` });
-        return;
-      } catch (e) {
-        if (e?.name === "AbortError") return;
-      }
+    const cols = showParty
+      ? [
+          ["Sr", 24], ["Date / Time", 64], ["Party", 88], ["Shift", 54], ["Item", 84], ["Type", 48],
+          ["Qty", 34], ["Rate", 46], ["Amount", 56], ["Status", 50], ["Credit", 54], ["Debit", 54], ["Note", 88],
+        ]
+      : [
+          ["Sr", 26], ["Date / Time", 74], ["Shift", 58], ["Item", 110], ["Type", 54], ["Qty", 38],
+          ["Rate", 50], ["Amount", 60], ["Status", 54], ["Credit", 58], ["Debit", 58], ["Note", 118],
+        ];
+
+    const scale = (pageW - margin * 2) / cols.reduce((sum, [, w]) => sum + w, 0);
+    const widths = cols.map(([, w]) => w * scale);
+    const xPositions = widths.reduce((list, w, i) => {
+      list.push(i === 0 ? margin : list[i - 1] + widths[i - 1]);
+      return list;
+    }, []);
+
+    const cell = (text, col, y, opts = {}) => {
+      const x = xPositions[col] + 3;
+      const maxWidth = widths[col] - 6;
+      doc.setFont("helvetica", opts.bold ? "bold" : "normal");
+      doc.setFontSize(opts.size || 8);
+      doc.setTextColor(opts.color || "#334155");
+      const clipped = doc.splitTextToSize(String(text ?? "-"), maxWidth)[0] || "";
+      doc.text(clipped, x, y);
+    };
+
+    const drawHeader = () => {
+      doc.setFillColor("#0f172a");
+      doc.rect(0, 0, pageW, headerH, "F");
+      doc.setTextColor("#ffffff");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.text(title, margin, 36);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(subtitle, margin, 56);
+      doc.text(`Generated ${fmtDate(todayStr())}`, pageW - margin - 120, 56);
+      doc.setDrawColor("#215464");
+      doc.setLineWidth(5);
+      doc.line(0, headerH, pageW, headerH);
+    };
+
+    const drawColumns = (y) => {
+      doc.setFillColor("#f1f5f9");
+      doc.rect(margin, y - 15, pageW - margin * 2, rowH, "F");
+      cols.forEach(([label], i) => cell(label, i, y, { bold: true, color: "#475569" }));
+    };
+
+    const ensureRoom = (y) => {
+      if (y + rowH < pageH - margin) return y;
+      doc.addPage();
+      drawHeader();
+      const nextY = headerH + 34;
+      drawColumns(nextY);
+      return nextY + rowH;
+    };
+
+    const rowCells = (t) => {
+      const isMoney = t.kind === "money";
+      const isItem = t.kind === "item";
+      const common = [
+        srNoMap[t.id],
+        `${fmtDate(t.date).replace(/ \d{4}$/, "")} ${fmtTime(t.createdAt)}`,
+      ];
+      if (showParty) common.push(t.customerName || "");
+      common.push(
+        isMoney ? "-" : t.shift || "-",
+        isMoney ? "Money" : isItem ? t.itemName : t.category,
+        isMoney || isItem ? "-" : t.type,
+        isMoney ? "-" : t.qty ?? "-",
+        isMoney ? "-" : money(t.rate),
+        money(t.amount),
+        STATUS_META[t.status].label,
+        t.status === "credit" ? money(t.amount) : "-",
+        t.status === "debit" ? money(t.amount) : "-",
+        t.note || "-"
+      );
+      return common;
+    };
+
+    drawHeader();
+    let y = headerH + 34;
+    drawColumns(y);
+    y += rowH;
+
+    if (previousBalance != null) {
+      y = ensureRoom(y);
+      cell("Previous Balance", 0, y, { bold: true, color: "#64748b" });
+      cell(money(previousBalance), showParty ? 8 : 7, y, { bold: true, color: "#0f172a" });
+      y += rowH;
     }
 
+    rows.forEach((t) => {
+      y = ensureRoom(y);
+      rowCells(t).forEach((value, i) => cell(value, i, y, { bold: i === (showParty ? 8 : 7) }));
+      y += rowH;
+    });
+
+    if (totals) {
+      y = ensureRoom(y);
+      doc.setFillColor("#f8fafc");
+      doc.rect(margin, y - 15, pageW - margin * 2, rowH, "F");
+      const totalCells = Array(cols.length).fill("");
+      totalCells[0] = "TOTAL";
+      totalCells[showParty ? 6 : 5] = totals.qty ?? "";
+      totalCells[showParty ? 8 : 7] = money(totals.amount);
+      totalCells[showParty ? 10 : 9] = money(totals.credit);
+      totalCells[showParty ? 11 : 10] = money(totals.debit);
+      totalCells[showParty ? 12 : 11] = totals.balance != null ? `Balance ${money(totals.balance)}` : "";
+      totalCells.forEach((value, i) => cell(value, i, y, { bold: true, color: "#0f172a" }));
+    }
+
+    return doc.output("blob");
+  };
+
+  // Shares a Blob as a file via the native Android share sheet when available,
+  // falling back to browser file sharing/download for web preview.
+  const shareBlobAsFile = async (blob, filename, title) => {
+    if (!blob) { showToast("Couldn't generate the file"); return; }
     const data = await blobToBase64(blob);
-    if (await shareFile({
-      title: `${viewingParty.name} Image Statement`,
-      text: "Image statement generated from Milk Ledger.",
+    if (await shareNativeFile({
+      title,
+      text: "File generated from Milk Ledger.",
       path: filename,
       data,
     })) return;
 
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title });
+        return;
+      } catch (e) {
+        if (e?.name === "AbortError") return;
+        // fall through to download
+      }
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1301,21 +1258,123 @@ export default function MilkLedger() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showToast("Image exported");
+    showToast(`${filename} downloaded — share it from your gallery/downloads`);
   };
 
-  const shareStatement = async () => {
-    const text = buildStatementShareText();
-    if (await shareNativeText(`${viewingParty.name} Statement`, text)) return;
+  const buildShareText = (title, subtitle, totals) => {
+    const lines = [title, subtitle];
+    if (totals) {
+      if (totals.opening != null) lines.push(`Previous Balance: ₹${totals.opening}`);
+      lines.push(`Total Qty: ${totals.qty} L`);
+      lines.push(`Total Amount: ₹${totals.amount}`);
+      lines.push(`Total Credit: ₹${totals.credit}`);
+      lines.push(`Total Debit: ₹${totals.debit}`);
+      if (totals.balance != null) lines.push(`Balance (Credit − Debit + Previous): ₹${totals.balance}`);
+    }
+    return lines.join("\n");
+  };
+
+  const shareAsText = async (title, text) => {
+    if (await shareNativeText(title, text)) return;
     if (navigator.share) {
       try {
-        await navigator.share({ title: `${viewingParty.name} Statement`, text });
+        await navigator.share({ title, text });
         return;
       } catch (e) {
         if (e?.name === "AbortError") return;
       }
     }
-    setShareSheet({ title: `${viewingParty.name} Statement`, text });
+    setShareSheet({ title, text });
+  };
+
+  // Aggregate totals (no "balance" — that only makes sense for a single
+  // party's own previous-balance chain) used by History and Dashboard exports.
+  const aggregateTotals = (rows) => {
+    const qty = rows.reduce((s, t) => s + (t.kind === "money" ? 0 : (t.qty || 0)), 0);
+    const amount = rows.reduce((s, t) => s + t.amount, 0);
+    const credit = rows.filter((t) => t.status === "credit").reduce((s, t) => s + t.amount, 0);
+    const debit = rows.filter((t) => t.status === "debit").reduce((s, t) => s + t.amount, 0);
+    return { qty: round2(qty), amount: round2(amount), credit: round2(credit), debit: round2(debit) };
+  };
+
+  // ---------- Party Statement-specific wrappers ----------
+  const exportPartyCSV = () => {
+    const rangeTag = dateFrom || dateTo ? `_${dateFrom || "start"}_to_${dateTo || "today"}` : "";
+    downloadCSV(
+      partyStatement.rows.map((t) => ({ ...t, customerName: viewingParty.name })),
+      `${viewingParty.name.replace(/\s+/g, "_")}${rangeTag}_statement.csv`,
+      { previousBalance: partyStatement.opening, totals: partyStatement }
+    );
+  };
+
+  const shareStatementImage = async () => {
+    const rangeLabel = partyStatement.hasFilter ? `${dateFrom || "Start"} to ${dateTo || "Today"}` : "Full history";
+    const blob = await generateTableImageBlob(partyStatement.rows, {
+      title: "Milk Ledger — Statement",
+      subtitle: `${viewingParty.name} · ${rangeLabel}`,
+      showParty: false,
+      previousBalance: partyStatement.opening,
+      totals: partyStatement,
+      flowColorHex: FLOW_META[viewingParty.flow].color,
+    });
+    const rangeTag = dateFrom || dateTo ? `_${dateFrom || "start"}_to_${dateTo || "today"}` : "";
+    await shareBlobAsFile(blob, `${viewingParty.name.replace(/\s+/g, "_")}${rangeTag}_statement.jpg`, `${viewingParty.name} Statement`);
+  };
+
+  const shareStatementPdf = async () => {
+    const rangeLabel = partyStatement.hasFilter ? `${dateFrom || "Start"} to ${dateTo || "Today"}` : "Full history";
+    const blob = generateTablePdfBlob(partyStatement.rows, {
+      title: "Milk Ledger - Statement",
+      subtitle: `${viewingParty.name} - ${rangeLabel}`,
+      showParty: false,
+      previousBalance: partyStatement.opening,
+      totals: partyStatement,
+    });
+    const rangeTag = dateFrom || dateTo ? `_${dateFrom || "start"}_to_${dateTo || "today"}` : "";
+    await shareBlobAsFile(blob, `${viewingParty.name.replace(/\s+/g, "_")}${rangeTag}_statement.pdf`, `${viewingParty.name} Statement`);
+  };
+
+  const shareStatement = () => {
+    const rangeLabel = partyStatement.hasFilter ? `${dateFrom || "Start"} to ${dateTo || "Today"}` : "Full history";
+    const text = buildShareText(`${viewingParty.name} — Milk Ledger Statement`, rangeLabel, partyStatement);
+    shareAsText(`${viewingParty.name} Statement`, text);
+  };
+
+  // ---------- History tab export wrappers ----------
+  const historyFilterLabel = () => {
+    const flowLabel = historyFlowFilter === "all" ? "All Parties" : `${FLOW_META[historyFlowFilter].label}s`;
+    const partyLabel = historyFilter !== "all" ? ` · ${customerById(historyFilter)?.name}` : "";
+    return `${flowLabel}${partyLabel}`;
+  };
+
+  const exportHistoryCSV = () => {
+    downloadCSV(historyRows, `milk_ledger_history_${todayStr()}.csv`, { totals: aggregateTotals(historyList) });
+  };
+
+  const shareHistoryImage = async () => {
+    const blob = await generateTableImageBlob(historyRows, {
+      title: "Milk Ledger — History",
+      subtitle: historyFilterLabel(),
+      showParty: true,
+      totals: aggregateTotals(historyList),
+      flowColorHex: "#334155",
+    });
+    await shareBlobAsFile(blob, `milk_ledger_history_${todayStr()}.jpg`, "Milk Ledger History");
+  };
+
+  const shareHistoryPdf = async () => {
+    const blob = generateTablePdfBlob(historyRows, {
+      title: "Milk Ledger - History",
+      subtitle: historyFilterLabel(),
+      showParty: true,
+      totals: aggregateTotals(historyList),
+    });
+    await shareBlobAsFile(blob, `milk_ledger_history_${todayStr()}.pdf`, "Milk Ledger History");
+  };
+
+  const shareHistoryText = () => {
+    const text = buildShareText("Milk Ledger — Transaction History", historyFilterLabel(), aggregateTotals(historyList));
+    shareAsText("Milk Ledger History", text);
   };
 
   // ---------- Assistant: local answers (fast, no API, always accurate) ----------
@@ -1371,7 +1430,6 @@ export default function MilkLedger() {
 
   // ---------- Assistant: "show me X's statement/transactions" navigation ----------
   const MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
-  const toISODate = (d) => { const tz = d.getTimezoneOffset() * 60000; return new Date(d - tz).toISOString().slice(0, 10); };
   const monthRange = (year, monthIdx) => ({
     from: toISODate(new Date(year, monthIdx, 1)),
     to: toISODate(new Date(year, monthIdx + 1, 0)),
@@ -1544,8 +1602,34 @@ Sentence: "${text}"`;
 
   if (!ready) {
     return (
-      <div className="h-full min-h-dvh flex items-center justify-center bg-[#F7F8F6]">
+      <div className="h-full min-h-[600px] flex items-center justify-center bg-[#F7F8F6]">
         <div className="text-slate-400 text-sm">Loading ledger…</div>
+      </div>
+    );
+  }
+
+  if (security.pinEnabled && locked) {
+    return (
+      <div className="min-h-[700px] bg-[#0f172a] flex flex-col items-center justify-center px-6" style={{ maxWidth: 480, margin: "0 auto" }}>
+        <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mb-4">
+          <LockKeyhole size={28} className="text-white" />
+        </div>
+        <div className="text-white text-lg font-semibold mb-1">{businessProfile.businessName || "Milk Ledger"}</div>
+        <div className="text-white/50 text-sm mb-6">Enter PIN to unlock</div>
+        <input
+          type="password"
+          inputMode="numeric"
+          value={pinEntry}
+          onChange={(e) => setPinEntry(e.target.value.replace(/\D/g, "").slice(0, 8))}
+          onKeyDown={(e) => { if (e.key === "Enter") attemptUnlock(); }}
+          autoFocus
+          className="w-40 text-center text-2xl tracking-[0.5em] bg-white/10 text-white rounded-xl py-3 mb-3 outline-none border border-white/20"
+          placeholder="••••"
+        />
+        {pinError && <div className="text-red-400 text-xs mb-3">{pinError}</div>}
+        <button onClick={attemptUnlock} className="w-40 py-3 rounded-xl bg-white text-slate-800 font-semibold text-sm">
+          Unlock
+        </button>
       </div>
     );
   }
@@ -1562,10 +1646,10 @@ Sentence: "${text}"`;
   }
 
   return (
-    <div className="app-shell min-h-dvh bg-[#F7F8F6] flex flex-col font-[system-ui]">
+    <div className="min-h-[700px] bg-[#F7F8F6] flex flex-col font-[system-ui]" style={{ maxWidth: 480, margin: "0 auto", position: "relative" }}>
       {viewingParty ? (
         <>
-          <div className="app-header px-5 pt-6 pb-4 text-white rounded-b-2xl print:hidden" style={{ background: FLOW_META[viewingParty.flow].color }}>
+          <div className="px-5 pt-6 pb-4 text-white rounded-b-2xl print:hidden" style={{ background: FLOW_META[viewingParty.flow].color }}>
             <button onClick={() => setViewingParty(null)} className="flex items-center gap-1.5 text-sm text-white/80 mb-3">
               <ArrowLeft size={15} /> Back
             </button>
@@ -1588,7 +1672,7 @@ Sentence: "${text}"`;
             </div>
           </div>
 
-          <div className="app-content flex-1 overflow-y-auto px-4 pb-10 pt-4">
+          <div className="flex-1 overflow-y-auto px-4 pb-10 pt-4">
             <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3 flex items-center justify-between print:hidden">
               <div className="flex-1">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Previous Balance</div>
@@ -1695,7 +1779,7 @@ Sentence: "${text}"`;
             />
             <div className="text-[11px] text-slate-400 mt-2 text-center print:hidden">Scroll sideways to see all columns →</div>
 
-            <div className="responsive-stat-grid grid grid-cols-2 gap-2 mt-4">
+            <div className="grid grid-cols-2 gap-2 mt-4">
               <StatCard label="Total Qty" value={`${partyStatement.qty} L`} />
               <StatCard label="Total Amount" value={`₹${partyStatement.amount}`} />
               <StatCard label="Total Credit" value={`₹${partyStatement.credit}`} accent={STATUS_META.credit.color} />
@@ -1725,13 +1809,13 @@ Sentence: "${text}"`;
         </>
       ) : (
         <>
-      <div className="app-header px-5 pt-6 pb-4 bg-[#215464] text-white rounded-b-2xl">
+      <div className="px-5 pt-6 pb-4 bg-[#215464] text-white rounded-b-2xl">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center">
             <Droplet size={18} strokeWidth={2.2} />
           </div>
           <div>
-            <div className="text-[17px] font-semibold leading-tight">Milk Ledger</div>
+            <div className="text-[17px] font-semibold leading-tight">{businessProfile.businessName || t("appName")}</div>
             <div className="text-[12px] text-white/70 leading-tight">
               Purchase ₹{rates.purchase}/ltr · Sale items from ₹{Math.min(...Object.values(rates.saleItems || DEFAULT_SALE_ITEM_RATES).filter((v) => v > 0))}
             </div>
@@ -1739,21 +1823,23 @@ Sentence: "${text}"`;
         </div>
       </div>
 
-      <div className="app-content flex-1 overflow-y-auto px-4 pb-24 pt-4">
+      <div className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
         {tab === "dashboard" && (
           <Dashboard
             dashboard={dashboard}
-            rangeFrom={dashboardFrom}
-            rangeTo={dashboardTo}
-            setRangeFrom={setDashboardFrom}
-            setRangeTo={setDashboardTo}
-            rates={rates}
             transactions={transactions}
             customerById={customerById}
             srNoMap={srNoMap}
             onInvoice={setInvoiceTxn}
             onEdit={openEdit}
             onDelete={setDeleteTarget}
+            exportCSV={downloadCSV}
+            imageBlob={generateTableImageBlob}
+            pdfBlob={generateTablePdfBlob}
+            shareFile={shareBlobAsFile}
+            shareTextBuilder={buildShareText}
+            doShare={shareAsText}
+            totalsOf={aggregateTotals}
           />
         )}
 
@@ -1801,7 +1887,7 @@ Sentence: "${text}"`;
               </div>
             )}
 
-            <div className="party-grid flex flex-col gap-2">
+            <div className="flex flex-col gap-2">
               {filteredCustomers.map((c) => {
                 const due = transactions
                   .filter((t) => t.customerId === c.id && t.status !== "paid")
@@ -1833,7 +1919,15 @@ Sentence: "${text}"`;
 
         {tab === "history" && (
           <div>
-            <div className="grid grid-cols-3 gap-2 mb-2">
+            <div className="hidden print:block px-1 pt-1 pb-3">
+              <div className="text-lg font-bold text-slate-800">Milk Ledger — Transaction History</div>
+              <div className="text-xs text-slate-500">
+                {historyFlowFilter === "all" ? "All parties" : `${FLOW_META[historyFlowFilter].label}s`}
+                {historyFilter !== "all" ? ` · ${customerById(historyFilter)?.name}` : ""} · Generated {fmtDate(todayStr())}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 mb-2 print:hidden">
               {["all", "purchase", "sale"].map((f) => (
                 <button
                   key={f}
@@ -1851,7 +1945,7 @@ Sentence: "${text}"`;
             <select
               value={historyFilter}
               onChange={(e) => setHistoryFilter(e.target.value)}
-              className="w-full mb-3 bg-white border border-slate-200 rounded-xl px-3 py-3 text-base outline-none"
+              className="w-full mb-3 bg-white border border-slate-200 rounded-xl px-3 py-3 text-base outline-none print:hidden"
             >
               <option value="all">All parties</option>
               {customers
@@ -1867,7 +1961,7 @@ Sentence: "${text}"`;
 
             {historyList.length > 0 && (
               <TxnTable
-                rows={historyList.map((t) => ({ ...t, customerName: customerById(t.customerId)?.name }))}
+                rows={historyRows}
                 srNoMap={srNoMap}
                 showParty
                 onInvoice={setInvoiceTxn}
@@ -1876,238 +1970,461 @@ Sentence: "${text}"`;
               />
             )}
             {historyList.length > 0 && (
-              <div className="text-[11px] text-slate-400 mt-2 text-center">Scroll sideways to see all columns →</div>
+              <>
+                <div className="text-[11px] text-slate-400 mt-2 text-center print:hidden">Scroll sideways to see all columns →</div>
+                <div className="grid grid-cols-2 gap-2 mt-3 print:hidden">
+                  <button onClick={exportHistoryCSV} className="py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1.5">
+                    <Download size={14} /> CSV
+                  </button>
+                  <button onClick={shareHistoryPdf} className="py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1.5">
+                    <Printer size={14} /> PDF
+                  </button>
+                  <button onClick={shareHistoryImage} className="py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1.5">
+                    <ImageIcon size={14} /> Share as Image
+                  </button>
+                  <button onClick={shareHistoryText} className="py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1.5">
+                    <Share2 size={14} /> Share as Text
+                  </button>
+                </div>
+              </>
             )}
-          </div>
-        )}
-
-        {tab === "settings" && (
-          <div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-3">
-                Purchase Rates by Type (₹ / ltr basis)
-              </div>
-
-              <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Fresh</div>
-              <div className="flex flex-col gap-2 mb-3">
-                {["Buffalo", "Cow"].map((type) => (
-                  <div key={type} className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-slate-600">{type}</span>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      enterKeyHint="done"
-                      value={purchaseMatrixInputs.Fresh[type]}
-                      onChange={(e) => setPurchaseMatrixInputs((m) => ({ ...m, Fresh: { ...m.Fresh, [type]: e.target.value } }))}
-                      className="w-24 border border-slate-200 rounded-lg px-2.5 py-2 text-base outline-none focus:border-slate-400 text-right"
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Kachcha</div>
-              <div className="flex flex-col gap-2 mb-3">
-                {["Buffalo", "Cow", "Goat"].map((type) => (
-                  <div key={type} className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-slate-600">{type}</span>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      enterKeyHint="done"
-                      value={purchaseMatrixInputs.Kachcha[type]}
-                      onChange={(e) => setPurchaseMatrixInputs((m) => ({ ...m, Kachcha: { ...m.Kachcha, [type]: e.target.value } }))}
-                      className="w-24 border border-slate-200 rounded-lg px-2.5 py-2 text-base outline-none focus:border-slate-400 text-right"
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <button
-                onClick={savePurchaseMatrix}
-                className="w-full py-2.5 rounded-lg text-white text-sm font-semibold"
-                style={{ background: FLOW_META.purchase.color }}
-              >
-                Save Purchase Rates
-              </button>
-              <div className="text-xs text-slate-400 mt-2">
-                Selecting a Category + Type in a purchase entry auto-fills the rate from this table — still editable per-entry.
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
-                Fallback Rate (₹ / ltr basis)
-              </div>
-              <input
-                type="number"
-                inputMode="decimal"
-                enterKeyHint="done"
-                value={rateInputs.purchase}
-                onChange={(e) => setRateInputs((r) => ({ ...r, purchase: e.target.value }))}
-                className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none focus:border-slate-400"
-              />
-              <div className="text-xs text-slate-400 mt-1.5 mb-3">Used for Goat/Other combos not covered by the table above.</div>
-              <button
-                onClick={savePurchaseRate}
-                className="w-full py-2.5 rounded-lg bg-[#215464] text-white text-sm font-semibold flex items-center justify-center gap-1.5"
-              >
-                {savingRate ? <Check size={16} /> : "Save Fallback Rate"}
-              </button>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-3">
-                Sale Item Rates (₹ default per unit)
-              </div>
-              <div className="flex flex-col gap-2.5">
-                {SALE_ITEMS.filter((i) => i.key !== "other").map((item) => (
-                  <div key={item.key} className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-slate-600">{item.label}</span>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      enterKeyHint="done"
-                      value={saleItemRateInputs[item.key]}
-                      onChange={(e) => setSaleItemRateInputs((r) => ({ ...r, [item.key]: e.target.value }))}
-                      className="w-24 border border-slate-200 rounded-lg px-2.5 py-2 text-base outline-none focus:border-slate-400 text-right"
-                    />
-                  </div>
-                ))}
-              </div>
-              <button
-                onClick={saveSaleItemRates}
-                className="w-full mt-3 py-2.5 rounded-lg text-white text-sm font-semibold"
-                style={{ background: FLOW_META.sale.color }}
-              >
-                Save Item Rates
-              </button>
-              <div className="text-xs text-slate-400 mt-2">
-                "Other" has no fixed rate — you'll name the item and set qty/rate at entry time.
-              </div>
-            </div>
-
-            <div className="text-center text-[11px] text-slate-300 mt-6">
-              Purchase: Amount = Qty × Sample Weight (kg) × Rate. Sale items: Amount = Qty × Rate. Rates stay editable per-entry too.
-            </div>
-
-            <div className="bg-white rounded-xl border border-dashed border-slate-300 p-4 mt-6">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Demo Data</div>
-              <div className="text-xs text-slate-400 mb-3">
-                Adds 5 purchase suppliers + 5 sale customers, 10 transactions each, spread across this month. Useful for trying the app out — doesn't touch your existing parties or entries.
-              </div>
-              <button
-                onClick={() => setShowSeedConfirm(true)}
-                className="w-full py-2.5 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold"
-              >
-                Load Demo Data
-              </button>
-            </div>
           </div>
         )}
 
         {tab === "account" && (
           <div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-3">
-                <SettingsIcon size={14} /> Business Profile
+            {accountView === "menu" && (
+              <div className="flex flex-col gap-2">
+                {[
+                  { key: "profile", icon: Building2, label: t("businessProfile"), sub: businessProfile.businessName || "Not set", color: "#215464" },
+                  { key: "rates", icon: SettingsIcon, label: t("ratesAndData"), sub: "Purchase & sale rates, demo data", color: "#215464" },
+                  { key: "backup", icon: CloudUpload, label: t("backupRestore"), sub: autoBackup.lastBackupAt ? `Last backup ${fmtDate(new Date(autoBackup.lastBackupAt).toISOString().slice(0, 10))}` : "No backup yet", color: "#1b7a5e" },
+                  { key: "security", icon: LockKeyhole, label: t("security"), sub: security.pinEnabled ? "PIN lock on" : "No lock set", color: "#a1690a" },
+                  { key: "language", icon: Languages, label: t("language"), sub: LANGUAGES.find((l) => l.code === lang)?.label, color: "#6b4fa0" },
+                  { key: "activity", icon: ScrollText, label: t("activityLog"), sub: `${activityLog.length} events logged`, color: "#334155" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => setAccountView(item.key)}
+                    className="w-full bg-white rounded-xl border border-slate-200 px-4 py-3.5 flex items-center gap-3 text-left active:bg-slate-50"
+                  >
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: item.color + "1A" }}>
+                      <item.icon size={18} style={{ color: item.color }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-slate-800">{item.label}</div>
+                      <div className="text-xs text-slate-400 truncate">{item.sub}</div>
+                    </div>
+                    <ChevronRight size={16} className="text-slate-300 shrink-0" />
+                  </button>
+                ))}
               </div>
-              <Field label="Business Name">
-                <input value={businessProfile.name} onChange={(e) => setBusinessProfile((p) => ({ ...p, name: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" />
-              </Field>
-              <Field label="Statement Subtitle">
-                <input value={businessProfile.subtitle} onChange={(e) => setBusinessProfile((p) => ({ ...p, subtitle: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" />
-              </Field>
-              <Field label="Phone">
-                <input value={businessProfile.phone} onChange={(e) => setBusinessProfile((p) => ({ ...p, phone: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" />
-              </Field>
-              <Field label="Address">
-                <textarea value={businessProfile.address} onChange={(e) => setBusinessProfile((p) => ({ ...p, address: e.target.value }))} className="w-full h-20 border border-slate-200 rounded-lg px-3 py-3 text-base outline-none resize-none" />
-              </Field>
-              <button
-                onClick={async () => { await persist.businessProfile(businessProfile); await logActivity("Business profile updated"); showToast("Business profile saved"); }}
-                className="w-full py-2.5 rounded-lg bg-[#215464] text-white text-sm font-semibold"
-              >
-                Save Business Profile
-              </button>
-            </div>
+            )}
 
-            <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-3">
-                <HardDrive size={14} /> Backups
-              </div>
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                <button onClick={() => shareBackup("Local")} className="py-2.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1">
-                  <Download size={13} /> Local
+            {accountView === "profile" && (
+              <div>
+                <button onClick={() => setAccountView("menu")} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
+                  <ArrowLeft size={14} /> {t("back")}
                 </button>
-                <button onClick={() => shareBackup("Google Drive")} className="py-2.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1">
-                  <Cloud size={13} /> GDrive
-                </button>
-                <button onClick={() => shareBackup("OneDrive")} className="py-2.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1">
-                  <Cloud size={13} /> OneDrive
-                </button>
-              </div>
-              <Field label="Auto Backup">
-                <PillGroup options={["Off", "Every entry", "Fixed time"]} value={accountSettings.autoBackup} onChange={(v) => setAccountSettings((s) => ({ ...s, autoBackup: v }))} columns={3} />
-              </Field>
-              <Field label="Fixed Backup Time" hint="The app stores this preference; Android background scheduling needs a native worker in a release build.">
-                <input type="time" value={accountSettings.backupTime} onChange={(e) => setAccountSettings((s) => ({ ...s, backupTime: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" />
-              </Field>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-3">
-                <Shield size={14} /> Security & Language
-              </div>
-              <Field label="App Security">
-                <PillGroup options={["Off", "PIN/JWT", "Fingerprint"]} value={accountSettings.securityMode} onChange={(v) => setAccountSettings((s) => ({ ...s, securityMode: v }))} columns={3} activeColor="#334155" />
-              </Field>
-              <Field label="Language">
-                <PillGroup options={["English", "Hindi", "Gujarati"]} value={accountSettings.language} onChange={(v) => setAccountSettings((s) => ({ ...s, language: v }))} columns={3} activeColor="#6b4fa0" />
-              </Field>
-              <button
-                onClick={async () => { await persist.accountSettings(accountSettings); await logActivity("Account settings updated", `${accountSettings.language}, ${accountSettings.securityMode}, ${accountSettings.autoBackup}`); showToast("Account settings saved"); }}
-                className="w-full py-2.5 rounded-lg bg-slate-700 text-white text-sm font-semibold"
-              >
-                Save Account Settings
-              </button>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                  <Activity size={14} /> Activity Log
+                <div className="text-base font-semibold text-slate-800 mb-3">{t("businessProfile")}</div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col gap-3">
+                  <Field label="Business Name">
+                    <input
+                      value={profileInputs.businessName}
+                      onChange={(e) => setProfileInputs((p) => ({ ...p, businessName: e.target.value }))}
+                      placeholder="e.g. Shree Krishna Dairy"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none focus:border-slate-400"
+                    />
+                  </Field>
+                  <Field label="Owner / Manager Name">
+                    <input
+                      value={profileInputs.ownerName}
+                      onChange={(e) => setProfileInputs((p) => ({ ...p, ownerName: e.target.value }))}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none focus:border-slate-400"
+                    />
+                  </Field>
+                  <Field label="Phone">
+                    <input
+                      value={profileInputs.phone}
+                      onChange={(e) => setProfileInputs((p) => ({ ...p, phone: e.target.value }))}
+                      inputMode="tel"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none focus:border-slate-400"
+                    />
+                  </Field>
+                  <Field label="Address">
+                    <input
+                      value={profileInputs.address}
+                      onChange={(e) => setProfileInputs((p) => ({ ...p, address: e.target.value }))}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none focus:border-slate-400"
+                    />
+                  </Field>
+                  <Field label="Registration / GST No. (optional)">
+                    <input
+                      value={profileInputs.regNo}
+                      onChange={(e) => setProfileInputs((p) => ({ ...p, regNo: e.target.value }))}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none focus:border-slate-400"
+                    />
+                  </Field>
+                  <button onClick={saveBusinessProfile} className="w-full py-3 rounded-xl bg-[#215464] text-white text-sm font-semibold">
+                    {t("save")} Profile
+                  </button>
                 </div>
-                <span className="text-[11px] text-slate-400">{activityLog.length} events</span>
               </div>
-              {activityLog.length === 0 ? (
-                <div className="text-sm text-slate-400 py-4 text-center">No activity recorded yet.</div>
-              ) : (
-                <div className="flex flex-col gap-2 max-h-80 overflow-y-auto">
-                  {activityLog.slice(0, 80).map((entry) => (
-                    <div key={entry.id} className="border border-slate-100 rounded-lg px-3 py-2">
-                      <div className="text-sm font-semibold text-slate-700">{entry.action}</div>
-                      {entry.detail && <div className="text-xs text-slate-500 mt-0.5">{entry.detail}</div>}
-                      <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-                        <Clock3 size={11} /> {fmtDate(new Date(entry.ts - new Date(entry.ts).getTimezoneOffset() * 60000).toISOString().slice(0, 10))} {fmtTime(entry.ts)}
+            )}
+
+            {accountView === "rates" && (
+              <div>
+                <button onClick={() => setAccountView("menu")} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
+                  <ArrowLeft size={14} /> {t("back")}
+                </button>
+                <div className="text-base font-semibold text-slate-800 mb-3">{t("ratesAndData")}</div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-3">
+                    Purchase Rates by Type (₹ / ltr basis)
+                  </div>
+
+                  <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Fresh</div>
+                  <div className="flex flex-col gap-2 mb-3">
+                    {["Buffalo", "Cow"].map((type) => (
+                      <div key={type} className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-600">{type}</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          enterKeyHint="done"
+                          value={purchaseMatrixInputs.Fresh[type]}
+                          onChange={(e) => setPurchaseMatrixInputs((m) => ({ ...m, Fresh: { ...m.Fresh, [type]: e.target.value } }))}
+                          className="w-24 border border-slate-200 rounded-lg px-2.5 py-2 text-base outline-none focus:border-slate-400 text-right"
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Kachcha</div>
+                  <div className="flex flex-col gap-2 mb-3">
+                    {["Buffalo", "Cow", "Goat"].map((type) => (
+                      <div key={type} className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-600">{type}</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          enterKeyHint="done"
+                          value={purchaseMatrixInputs.Kachcha[type]}
+                          onChange={(e) => setPurchaseMatrixInputs((m) => ({ ...m, Kachcha: { ...m.Kachcha, [type]: e.target.value } }))}
+                          className="w-24 border border-slate-200 rounded-lg px-2.5 py-2 text-base outline-none focus:border-slate-400 text-right"
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={savePurchaseMatrix}
+                    className="w-full py-2.5 rounded-lg text-white text-sm font-semibold"
+                    style={{ background: FLOW_META.purchase.color }}
+                  >
+                    Save Purchase Rates
+                  </button>
+                  <div className="text-xs text-slate-400 mt-2">
+                    Selecting a Category + Type in a purchase entry auto-fills the rate from this table — still editable per-entry.
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
+                    Fallback Rate (₹ / ltr basis)
+                  </div>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    enterKeyHint="done"
+                    value={rateInputs.purchase}
+                    onChange={(e) => setRateInputs((r) => ({ ...r, purchase: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none focus:border-slate-400"
+                  />
+                  <div className="text-xs text-slate-400 mt-1.5 mb-3">Used for Goat/Other combos not covered by the table above.</div>
+                  <button
+                    onClick={savePurchaseRate}
+                    className="w-full py-2.5 rounded-lg bg-[#215464] text-white text-sm font-semibold flex items-center justify-center gap-1.5"
+                  >
+                    {savingRate ? <Check size={16} /> : "Save Fallback Rate"}
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-3">
+                    Sale Item Rates (₹ default per unit)
+                  </div>
+                  <div className="flex flex-col gap-2.5">
+                    {SALE_ITEMS.filter((i) => i.key !== "other").map((item) => (
+                      <div key={item.key} className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-600">{item.label}</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          enterKeyHint="done"
+                          value={saleItemRateInputs[item.key]}
+                          onChange={(e) => setSaleItemRateInputs((r) => ({ ...r, [item.key]: e.target.value }))}
+                          className="w-24 border border-slate-200 rounded-lg px-2.5 py-2 text-base outline-none focus:border-slate-400 text-right"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={saveSaleItemRates}
+                    className="w-full mt-3 py-2.5 rounded-lg text-white text-sm font-semibold"
+                    style={{ background: FLOW_META.sale.color }}
+                  >
+                    Save Item Rates
+                  </button>
+                  <div className="text-xs text-slate-400 mt-2">
+                    "Other" has no fixed rate — you'll name the item and set qty/rate at entry time.
+                  </div>
+                </div>
+
+                <div className="text-center text-[11px] text-slate-300 mt-6">
+                  Purchase: Amount = Qty × Sample Weight (kg) × Rate. Sale items: Amount = Qty × Rate. Rates stay editable per-entry too.
+                </div>
+
+                <div className="bg-white rounded-xl border border-dashed border-slate-300 p-4 mt-6">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Demo Data</div>
+                  <div className="text-xs text-slate-400 mb-3">
+                    Adds 5 purchase suppliers + 5 sale customers, 10 transactions each, spread across this month. Useful for trying the app out — doesn't touch your existing parties or entries.
+                  </div>
+                  <button
+                    onClick={() => setShowSeedConfirm(true)}
+                    className="w-full py-2.5 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold"
+                  >
+                    Load Demo Data
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {accountView === "backup" && (
+              <div>
+                <button onClick={() => setAccountView("menu")} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
+                  <ArrowLeft size={14} /> {t("back")}
+                </button>
+                <div className="text-base font-semibold text-slate-800 mb-3">{t("backupRestore")}</div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Manual Backup</div>
+                  <div className="text-xs text-slate-400 mb-3">
+                    Creates a full backup file (parties, transactions, rates, profile) and opens your device's share menu — pick Google Drive, OneDrive, email, or Save to keep it locally. There's no direct Drive/OneDrive login here, this just hands the file to whatever your share menu offers.
+                  </div>
+                  {autoBackup.lastBackupAt && (
+                    <div className="text-xs text-slate-500 mb-3">
+                      Last backup: {fmtDate(new Date(autoBackup.lastBackupAt).toISOString().slice(0, 10))} · {fmtTime(autoBackup.lastBackupAt)}
+                    </div>
+                  )}
+                  <button
+                    onClick={downloadBackupFile}
+                    className="w-full py-3 rounded-xl text-white text-sm font-semibold flex items-center justify-center gap-1.5"
+                    style={{ background: "#1b7a5e" }}
+                  >
+                    <CloudUpload size={16} /> Backup Now
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Restore from Backup</div>
+                  <div className="text-xs text-slate-400 mb-3">
+                    Choose a previously saved backup .json file. This replaces your current parties, transactions, and rates — you'll be asked to confirm first.
+                  </div>
+                  {restoreError && <div className="text-xs text-red-500 mb-2">{restoreError}</div>}
+                  <input ref={fileInputRef} type="file" accept="application/json" onChange={handleRestoreFile} className="hidden" />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full py-3 rounded-xl bg-slate-100 text-slate-600 text-sm font-semibold flex items-center justify-center gap-1.5"
+                  >
+                    <CloudDownload size={16} /> Choose Backup File
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-3">Auto-Backup</div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="pr-3">
+                      <div className="text-sm text-slate-700 font-medium">Snapshot on every entry</div>
+                      <div className="text-xs text-slate-400">Keeps a fresh local backup file ready after each save</div>
+                    </div>
+                    <button
+                      onClick={() => saveAutoBackupSettings({ onEveryEntry: !autoBackup.onEveryEntry })}
+                      className="w-11 h-6 rounded-full relative shrink-0"
+                      style={{ background: autoBackup.onEveryEntry ? "#1b7a5e" : "#e2e8f0" }}
+                    >
+                      <span className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all" style={{ left: autoBackup.onEveryEntry ? 22 : 2 }} />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="pr-3">
+                      <div className="text-sm text-slate-700 font-medium">Scheduled backup reminder</div>
+                      <div className="text-xs text-slate-400">Nudges you at this time if you haven't backed up yet today</div>
+                    </div>
+                    <button
+                      onClick={() => saveAutoBackupSettings({ scheduled: !autoBackup.scheduled })}
+                      className="w-11 h-6 rounded-full relative shrink-0"
+                      style={{ background: autoBackup.scheduled ? "#1b7a5e" : "#e2e8f0" }}
+                    >
+                      <span className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all" style={{ left: autoBackup.scheduled ? 22 : 2 }} />
+                    </button>
+                  </div>
+                  {autoBackup.scheduled && (
+                    <input
+                      type="time"
+                      value={autoBackup.scheduledTime}
+                      onChange={(e) => saveAutoBackupSettings({ scheduledTime: e.target.value })}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base outline-none mt-2"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {accountView === "security" && (
+              <div>
+                <button onClick={() => setAccountView("menu")} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
+                  <ArrowLeft size={14} /> {t("back")}
+                </button>
+                <div className="text-base font-semibold text-slate-800 mb-3">{t("security")}</div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">PIN Lock</div>
+                  <div className="text-xs text-slate-400 mb-3">
+                    Locks the app behind a PIN, stored only as a secure hash on this device. This is a local device lock — there's no backend here for a real server-verified login (JWT), so this is the practical equivalent.
+                  </div>
+
+                  {!security.pinEnabled && pinSetupStep === null && (
+                    <button onClick={startSetPin} className="w-full py-3 rounded-xl text-white text-sm font-semibold" style={{ background: "#215464" }}>
+                      Set a PIN
+                    </button>
+                  )}
+
+                  {pinSetupStep === "new" && (
+                    <div>
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        value={pinNew}
+                        onChange={(e) => setPinNew(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                        placeholder="Enter new PIN (4–8 digits)"
+                        className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none mb-2 text-center tracking-[0.3em]"
+                      />
+                      {pinError && <div className="text-xs text-red-500 mb-2">{pinError}</div>}
+                      <button onClick={submitNewPin} className="w-full py-3 rounded-xl text-white text-sm font-semibold" style={{ background: "#215464" }}>
+                        Continue
+                      </button>
+                    </div>
+                  )}
+
+                  {pinSetupStep === "confirm" && (
+                    <div>
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        value={pinConfirm}
+                        onChange={(e) => setPinConfirm(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                        placeholder="Confirm PIN"
+                        className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none mb-2 text-center tracking-[0.3em]"
+                      />
+                      {pinError && <div className="text-xs text-red-500 mb-2">{pinError}</div>}
+                      <button onClick={submitConfirmPin} className="w-full py-3 rounded-xl text-white text-sm font-semibold" style={{ background: "#215464" }}>
+                        Confirm &amp; Enable
+                      </button>
+                    </div>
+                  )}
+
+                  {security.pinEnabled && pinSetupStep === null && (
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-emerald-700 font-medium flex items-center gap-1.5">
+                        <Check size={14} /> PIN lock is on
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={startSetPin} className="text-xs font-semibold text-slate-500 px-3 py-2 rounded-lg bg-slate-100">Change</button>
+                        <button onClick={removePin} className="text-xs font-semibold px-3 py-2 rounded-lg" style={{ color: STATUS_META.debit.color, background: STATUS_META.debit.bg }}>Remove</button>
                       </div>
                     </div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Biometric Unlock</div>
+                  <div className="text-xs text-slate-400 mb-3">
+                    Full fingerprint/face unlock needs a native app shell to work reliably — inside this web preview it can only check whether your device reports biometric hardware. PIN above is what actually locks the app here.
+                  </div>
+                  <button onClick={checkBiometricAvailability} className="w-full py-2.5 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold flex items-center justify-center gap-1.5">
+                    <Fingerprint size={16} /> Check Biometric Support
+                  </button>
+                  {biometricAvailable !== null && (
+                    <div className={`text-xs mt-2 text-center ${biometricAvailable ? "text-emerald-600" : "text-slate-400"}`}>
+                      {biometricAvailable ? "✓ This device reports biometric hardware is available" : "No biometric hardware detected / not supported here"}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {accountView === "language" && (
+              <div>
+                <button onClick={() => setAccountView("menu")} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
+                  <ArrowLeft size={14} /> {t("back")}
+                </button>
+                <div className="text-base font-semibold text-slate-800 mb-3">{t("language")}</div>
+                <div className="flex flex-col gap-2">
+                  {LANGUAGES.map((l) => (
+                    <button
+                      key={l.code}
+                      onClick={() => changeLanguage(l.code)}
+                      className={`flex items-center justify-between px-4 py-3.5 rounded-xl border ${lang === l.code ? "border-[#215464]" : "border-slate-200 bg-white"}`}
+                      style={lang === l.code ? { background: "#21546410" } : {}}
+                    >
+                      <span className="text-sm font-medium text-slate-800">{l.label}</span>
+                      {lang === l.code && <Check size={16} className="text-[#215464]" />}
+                    </button>
                   ))}
                 </div>
-              )}
-            </div>
+                <div className="text-xs text-slate-400 mt-3">
+                  Translates the main navigation and common actions. Deeper translation of every dialog is a larger follow-up if you'd like it.
+                </div>
+              </div>
+            )}
+
+            {accountView === "activity" && (
+              <div>
+                <button onClick={() => setAccountView("menu")} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
+                  <ArrowLeft size={14} /> {t("back")}
+                </button>
+                <div className="text-base font-semibold text-slate-800 mb-3">{t("activityLog")}</div>
+                {activityLog.length === 0 ? (
+                  <div className="text-center text-slate-400 text-sm py-10">No activity recorded yet.</div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {activityLog.map((entry) => (
+                      <div key={entry.id} className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 uppercase">{entry.type}</span>
+                          <span className="text-[11px] text-slate-400">{fmtDate(new Date(entry.ts).toISOString().slice(0, 10))} · {fmtTime(entry.ts)}</span>
+                        </div>
+                        <div className="text-sm text-slate-700">{entry.message}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      <div className="bottom-nav absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around py-2 rounded-b-2xl">
+      <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around py-2 rounded-b-2xl">
         {[
-          { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
-          { id: "customers", icon: Users, label: "Parties" },
-          { id: "history", icon: History, label: "History" },
-          { id: "settings", icon: SettingsIcon, label: "Rates" },
-          { id: "account", icon: Shield, label: "Account" },
+          { id: "dashboard", icon: LayoutDashboard, label: t("navDashboard") },
+          { id: "customers", icon: Users, label: t("navParties") },
+          { id: "history", icon: History, label: t("navHistory") },
+          { id: "account", icon: UserCircle2, label: t("navAccount") },
         ].map(({ id, icon: Icon, label }) => (
-          <button key={id} onClick={() => setTab(id)} className="flex flex-col items-center gap-0.5 px-2 py-1">
+          <button key={id} onClick={() => setTab(id)} className="flex flex-col items-center gap-0.5 px-3 py-1">
             <Icon size={19} color={tab === id ? "#215464" : "#94a3b8"} strokeWidth={tab === id ? 2.4 : 2} />
             <span className={`text-[10px] ${tab === id ? "text-[#215464] font-semibold" : "text-slate-400"}`}>{label}</span>
           </button>
@@ -2117,7 +2434,7 @@ Sentence: "${text}"`;
       )}
 
       {toast && (
-        <div className="toast absolute left-1/2 -translate-x-1/2 bottom-24 bg-slate-900 text-white text-xs px-4 py-2 rounded-full shadow-lg">
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-24 bg-slate-900 text-white text-xs px-4 py-2 rounded-full shadow-lg">
           {toast}
         </div>
       )}
@@ -2313,6 +2630,34 @@ Sentence: "${text}"`;
         </Modal>
       )}
 
+      {pendingRestore && (
+        <Modal title="Restore This Backup?" onClose={() => setPendingRestore(null)}>
+          <div className="pb-2">
+            <p className="text-sm text-slate-600 mb-4">
+              This backup has <span className="font-semibold">{pendingRestore.customers?.length || 0} parties</span> and{" "}
+              <span className="font-semibold">{pendingRestore.transactions?.length || 0} transactions</span>
+              {pendingRestore.exportedAt ? ` from ${fmtDate(pendingRestore.exportedAt.slice(0, 10))}` : ""}. Restoring will{" "}
+              <span className="font-semibold">replace</span> your current parties, transactions, and rates. This can't be undone — consider taking a fresh backup first if unsure.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setPendingRestore(null)}
+                className="py-3 rounded-xl bg-slate-100 text-slate-600 text-sm font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRestore}
+                className="py-3 rounded-xl text-white text-sm font-semibold"
+                style={{ background: STATUS_META.debit.color }}
+              >
+                Restore
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Floating Assistant button — hidden while any other dialog/sheet is open */}
       {shareSheet && (
         <ShareSheet title={shareSheet.title} text={shareSheet.text} onClose={() => setShareSheet(null)} />
@@ -2321,7 +2666,7 @@ Sentence: "${text}"`;
       {!showAssistant && !dialogCustomer && !showAddCustomer && !deleteTarget && !invoiceTxn && !showSeedConfirm && !shareSheet && (
         <button
           onClick={() => { setShowAssistant(true); setAssistantView("chat"); }}
-          className="assistant-fab absolute z-10 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white"
+          className="absolute z-10 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white"
           style={{ right: 16, bottom: viewingParty ? 24 : 76, background: "#215464" }}
         >
           <MessageCircle size={24} />
@@ -2443,54 +2788,59 @@ Sentence: "${text}"`;
 }
 
 // ---------- Dashboard ----------
-function Dashboard({ dashboard, rangeFrom, rangeTo, setRangeFrom, setRangeTo, rates, transactions, customerById, srNoMap, onInvoice, onEdit, onDelete }) {
-  const { todayPurchase, todaySale, byStatus, days, topDebtors, outstanding, netToday, hasRange } = dashboard;
-  const [selectedDate, setSelectedDate] = useState(todayStr());
+function Dashboard({ dashboard, transactions, customerById, srNoMap, onInvoice, onEdit, onDelete, exportCSV, imageBlob, pdfBlob, shareFile, shareTextBuilder, doShare, totalsOf }) {
+  const { todayPurchase, todaySale, byStatus, days, topDebtors, outstanding, netToday } = dashboard;
+  const [dateFrom, setDateFrom] = useState(todayStr());
+  const [dateTo, setDateTo] = useState(todayStr());
 
   const dateRows = useMemo(() => {
     return transactions
-      .filter((t) => t.date === selectedDate)
+      .filter((t) => t.date >= dateFrom && t.date <= dateTo)
       .map((t) => ({ ...t, flow: customerById(t.customerId)?.flow || "purchase", customerName: customerById(t.customerId)?.name }))
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  }, [transactions, selectedDate, customerById]);
+  }, [transactions, dateFrom, dateTo, customerById]);
+
+  const rangeLabel = dateFrom === dateTo ? fmtDate(dateFrom) : `${fmtDate(dateFrom)} to ${fmtDate(dateTo)}`;
+  const rangeTag = dateFrom === dateTo ? dateFrom : `${dateFrom}_to_${dateTo}`;
+
+  const exportDateCSV = () => exportCSV(dateRows, `milk_ledger_${rangeTag}.csv`, { totals: totalsOf(dateRows) });
+
+  const shareDateImage = async () => {
+    const blob = await imageBlob(dateRows, {
+      title: "Milk Ledger — Transactions",
+      subtitle: rangeLabel,
+      showParty: true,
+      totals: totalsOf(dateRows),
+      flowColorHex: "#334155",
+    });
+    await shareFile(blob, `milk_ledger_${rangeTag}.jpg`, "Milk Ledger — Transactions");
+  };
+
+  const shareDatePdf = async () => {
+    const blob = pdfBlob(dateRows, {
+      title: "Milk Ledger - Transactions",
+      subtitle: rangeLabel,
+      showParty: true,
+      totals: totalsOf(dateRows),
+    });
+    await shareFile(blob, `milk_ledger_${rangeTag}.pdf`, "Milk Ledger - Transactions");
+  };
+
+  const shareDateText = () => {
+    const text = shareTextBuilder("Milk Ledger — Transactions", rangeLabel, totalsOf(dateRows));
+    doShare("Milk Ledger — Transactions", text);
+  };
 
   return (
     <div>
-      <div className="bg-white rounded-xl border border-slate-200 p-3 mb-3">
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Dashboard Period</div>
-          {hasRange && (
-            <button onClick={() => { setRangeFrom(""); setRangeTo(""); }} className="text-xs font-medium text-slate-400 underline">
-              Today
-            </button>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <input
-            type="date"
-            value={rangeFrom}
-            onChange={(e) => setRangeFrom(e.target.value)}
-            className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none"
-          />
-          <input
-            type="date"
-            value={rangeTo}
-            onChange={(e) => setRangeTo(e.target.value)}
-            className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none"
-          />
-        </div>
-        <div className="text-xs text-slate-400 mt-2">
-          {hasRange ? statementRangeText(rangeFrom, rangeTo) : `Today: ${fmtDate(todayStr())}`}
-        </div>
-      </div>
-      <div className="responsive-stat-grid grid grid-cols-2 gap-3 mb-3">
-        <StatCard label={hasRange ? "Period Purchase" : "Today's Purchase"} value={`${todayPurchase.ltr} L`} sub={`₹${todayPurchase.amt} · ${todayPurchase.count} entries`} accent={FLOW_META.purchase.color} />
-        <StatCard label={hasRange ? "Period Sale" : "Today's Sale"} value={`${todaySale.ltr} L`} sub={`₹${todaySale.amt} · ${todaySale.count} entries`} accent={FLOW_META.sale.color} />
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <StatCard label="Today's Purchase" value={`${todayPurchase.ltr} L`} sub={`₹${todayPurchase.amt} · ${todayPurchase.count} entries`} accent={FLOW_META.purchase.color} />
+        <StatCard label="Today's Sale" value={`${todaySale.ltr} L`} sub={`₹${todaySale.amt} · ${todaySale.count} entries`} accent={FLOW_META.sale.color} />
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3 flex items-center justify-between">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{hasRange ? "Period" : "Today's"} Net (Sale − Purchase)</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Today's Net (Sale − Purchase)</div>
           <div className="text-[11px] text-slate-400 mt-0.5">Rough margin indicator, not full P&amp;L</div>
         </div>
         <div className={`text-xl font-bold ${netToday >= 0 ? "text-[#1b7a5e]" : "text-[#b3391f]"}`}>
@@ -2519,7 +2869,7 @@ function Dashboard({ dashboard, rangeFrom, rangeTo, setRangeFrom, setRangeTo, ra
         </div>
       </div>
 
-      <div className="status-grid grid grid-cols-3 gap-2 mb-3">
+      <div className="grid grid-cols-3 gap-2 mb-3">
         {Object.entries(STATUS_META).map(([key, meta]) => (
           <div key={key} className="rounded-xl p-3" style={{ background: meta.bg }}>
             <div className="text-[11px] font-medium" style={{ color: meta.color }}>{meta.label}</div>
@@ -2553,26 +2903,70 @@ function Dashboard({ dashboard, rangeFrom, rangeTo, setRangeFrom, setRangeTo, ra
       </div>
 
       <div className="mt-3">
-        <div className="flex items-center justify-between mb-2">
+        <div className="hidden print:block mb-2">
+          <div className="text-lg font-bold text-slate-800">Milk Ledger — Transactions</div>
+          <div className="text-xs text-slate-500">{rangeLabel} · Generated {fmtDate(todayStr())}</div>
+        </div>
+        <div className="flex items-center justify-between mb-2 print:hidden">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Transactions</div>
+          <div className="flex items-center gap-1">
+            {[
+              { label: "Today", from: todayStr(), to: todayStr() },
+              { label: "7d", from: toISODate(new Date(Date.now() - 6 * 86400000)), to: todayStr() },
+              { label: "Month", from: `${todayStr().slice(0, 7)}-01`, to: todayStr() },
+            ].map((q) => (
+              <button
+                key={q.label}
+                onClick={() => { setDateFrom(q.from); setDateTo(q.to); }}
+                className="text-[10px] font-semibold px-2 py-1 rounded-md bg-white border border-slate-200 text-slate-500"
+              >
+                {q.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2 print:hidden">
           <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1.5">
-            <CalendarDays size={13} className="text-slate-400" />
+            <CalendarDays size={13} className="text-slate-400 shrink-0" />
             <input
               type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="text-xs outline-none bg-transparent"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="text-xs outline-none bg-transparent w-full"
+            />
+          </div>
+          <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1.5">
+            <CalendarDays size={13} className="text-slate-400 shrink-0" />
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="text-xs outline-none bg-transparent w-full"
             />
           </div>
         </div>
         {dateRows.length === 0 ? (
           <div className="text-center text-slate-400 text-sm py-8 bg-white rounded-xl border border-slate-200">
-            No transactions on {fmtDate(selectedDate)}.
+            No transactions in this range.
           </div>
         ) : (
           <>
             <TxnTable rows={dateRows} srNoMap={srNoMap} showParty onInvoice={onInvoice} onEdit={onEdit} onDelete={onDelete} />
             <div className="text-[11px] text-slate-400 mt-2 text-center">Scroll sideways to see all columns →</div>
+            <div className="grid grid-cols-2 gap-2 mt-3 print:hidden">
+              <button onClick={exportDateCSV} className="py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1.5">
+                <Download size={14} /> CSV
+              </button>
+              <button onClick={shareDatePdf} className="py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1.5">
+                <Printer size={14} /> PDF
+              </button>
+              <button onClick={shareDateImage} className="py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1.5">
+                <ImageIcon size={14} /> Share as Image
+              </button>
+              <button onClick={shareDateText} className="py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1.5">
+                <Share2 size={14} /> Share as Text
+              </button>
+            </div>
           </>
         )}
       </div>
@@ -2581,7 +2975,7 @@ function Dashboard({ dashboard, rangeFrom, rangeTo, setRangeFrom, setRangeTo, ra
 }
 
 const StatCard = ({ label, value, sub, accent }) => (
-  <div className="stat-card bg-white rounded-xl border border-slate-200 p-3.5">
+  <div className="bg-white rounded-xl border border-slate-200 p-3.5">
     <div className="text-[11px] font-medium text-slate-400">{label}</div>
     <div className="text-[20px] font-bold mt-0.5" style={{ color: accent || "#1e293b" }}>{value}</div>
     <div className="text-[11px] text-slate-400 mt-0.5">{sub}</div>
@@ -2713,7 +3107,7 @@ function TxnTable({ rows, srNoMap, showParty, onInvoice, onEdit, onDelete, previ
     : ["Sr No", "Date / Time", "Shift", "Item", "Type", "Qty", "Rate", "Amount", "Status", "Credit", "Debit", "Note", "Action"];
 
   return (
-    <div className="txn-table-wrap bg-white rounded-xl border border-slate-200 overflow-x-auto">
+    <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
       <table className={`text-[12px] border-collapse ${showParty ? "min-w-[900px]" : "min-w-[800px]"}`}>
         <thead>
           <tr className="bg-slate-50 text-slate-500 text-left">
@@ -2828,9 +3222,9 @@ function TxnTable({ rows, srNoMap, showParty, onInvoice, onEdit, onDelete, previ
 // how tall the form is or whether the on-screen keyboard is open.
 function Modal({ title, children, footer, onClose }) {
   return (
-    <div className="modal-backdrop absolute inset-0 bg-black/40 flex items-end z-20" onClick={onClose}>
+    <div className="absolute inset-0 bg-black/40 flex items-end z-20" onClick={onClose}>
       <div
-        className="modal-panel w-full bg-white rounded-t-2xl flex flex-col"
+        className="w-full bg-white rounded-t-2xl flex flex-col"
         style={{ maxHeight: "92%" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -2840,10 +3234,10 @@ function Modal({ title, children, footer, onClose }) {
             <X size={14} className="text-slate-500" />
           </button>
         </div>
-        <div className="modal-scroll flex-1 overflow-y-auto px-5 pt-4" style={{ WebkitOverflowScrolling: "touch" }}>
+        <div className="flex-1 overflow-y-auto px-5 pt-4" style={{ WebkitOverflowScrolling: "touch" }}>
           {children}
         </div>
-        {footer && <div className="modal-footer px-5 pt-3 pb-5 shrink-0 border-t border-slate-100">{footer}</div>}
+        {footer && <div className="px-5 pt-3 pb-5 shrink-0 border-t border-slate-100">{footer}</div>}
       </div>
     </div>
   );
@@ -2949,8 +3343,8 @@ function InvoiceView({ txn, customer, srNo, onClose }) {
   };
 
   return (
-    <div className="invoice-shell min-h-dvh bg-[#F2F3F1] flex flex-col items-center py-6 px-4 font-[system-ui]">
-      <div className="invoice-toolbar w-full print:hidden flex items-center justify-between mb-4 gap-2" style={{ maxWidth: 420 }}>
+    <div className="min-h-[700px] bg-[#F2F3F1] flex flex-col items-center py-6 px-4 font-[system-ui]">
+      <div className="w-full print:hidden flex items-center justify-between mb-4 gap-2" style={{ maxWidth: 420 }}>
         <button onClick={onClose} className="flex items-center gap-1.5 text-sm font-medium text-slate-600">
           <ArrowLeft size={16} /> Back
         </button>
@@ -2970,7 +3364,7 @@ function InvoiceView({ txn, customer, srNo, onClose }) {
         </div>
       </div>
 
-      <div className="invoice-card w-full bg-white rounded-2xl border border-slate-200 p-6" style={{ maxWidth: 420 }}>
+      <div className="w-full bg-white rounded-2xl border border-slate-200 p-6" style={{ maxWidth: 420 }}>
         <div className="flex items-center gap-2 mb-1">
           <Droplet size={18} className="text-[#215464]" />
           <div className="text-[17px] font-bold text-slate-800">Milk Ledger</div>
