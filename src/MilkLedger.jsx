@@ -142,12 +142,6 @@ const Field = ({ label, children, hint }) => (
   </div>
 );
 
-const monthDiff = (from, to) => {
-  const a = new Date(`${from}T00:00:00`);
-  const b = new Date(`${to}T00:00:00`);
-  return Math.max(0, (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()));
-};
-
 const daysBetween = (from, to) => {
   const a = new Date(`${from}T00:00:00`);
   const b = new Date(`${to}T00:00:00`);
@@ -162,23 +156,57 @@ const addMonthsISO = (iso, months) => {
 
 const loanEntryAmount = (entry) => round2(parseFloat(entry.amount) || 0);
 
-const calculateLoanState = (loan, asOf = todayStr()) => {
+const sameMonth = (a, b) => a?.slice(0, 7) === b?.slice(0, 7);
+
+const buildLoanLedgerRows = (loan, asOf = todayStr()) => {
+  const rate = (parseFloat(loan.rate) || 0) / 100;
   const entries = [...(loan.entries || [])].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0));
+  const actualInterest = entries.filter((entry) => entry.type === "interest");
+  const events = entries.filter((entry) => entry.type !== "disbursement" && entry.date <= asOf).map((entry) => ({ ...entry, generated: false }));
+  const settlementDate = entries.find((entry) => entry.type === "settlement")?.date;
+
+  for (let date = addMonthsISO(loan.startDate, 1); date <= asOf && (!settlementDate || date <= settlementDate); date = addMonthsISO(date, 1)) {
+    if (!actualInterest.some((entry) => sameMonth(entry.date, date))) {
+      events.push({ id: `auto-interest-${loan.id}-${date}`, type: "interest", date, generated: true, note: `Interest for ${fmtDate(date).slice(3)}` });
+    }
+  }
+
+  events.sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.generated === b.generated ? 0 : a.generated ? 1 : -1));
+
   let principal = round2(parseFloat(loan.principal) || 0);
   let interestDue = 0;
   let compoundBalance = principal;
   let lastInterestDate = loan.startDate;
   let status = loan.status || "active";
+  const rows = [{
+    id: `${loan.id}-principal`,
+    date: loan.startDate,
+    type: "disbursement",
+    label: "Disbursement",
+    amount: principal,
+    note: "Loan principal",
+    balance: principal,
+    generated: false,
+  }];
 
-  entries.forEach((entry) => {
-    if (entry.date > asOf) return;
-    const amount = loanEntryAmount(entry);
-    if (entry.type === "interest") {
-      lastInterestDate = entry.date;
+  const currentBalance = () => loan.interestType === "compound" ? compoundBalance : round2(principal + interestDue);
+
+  events.forEach((event) => {
+    const rawAmount = loanEntryAmount(event);
+    let amount = rawAmount;
+    let label = event.type;
+
+    if (event.type === "interest") {
+      const base = loan.interestType === "compound" ? compoundBalance : principal;
+      amount = event.generated ? round2(base * rate) : rawAmount;
+      lastInterestDate = event.date;
+      label = event.generated ? "Monthly Interest" : "Interest";
       if (loan.interestType === "compound") compoundBalance = round2(compoundBalance + amount);
       else interestDue = round2(interestDue + amount);
     }
-    if (entry.type === "deposit") {
+
+    if (event.type === "deposit") {
+      label = "Deposit";
       if (loan.interestType === "compound") {
         compoundBalance = round2(Math.max(0, compoundBalance - amount));
       } else {
@@ -187,7 +215,9 @@ const calculateLoanState = (loan, asOf = todayStr()) => {
         principal = round2(Math.max(0, principal - (amount - toInterest)));
       }
     }
-    if (entry.type === "settlement") {
+
+    if (event.type === "settlement") {
+      label = "Settlement";
       status = "settled";
       if (loan.interestType === "compound") compoundBalance = 0;
       else {
@@ -195,13 +225,24 @@ const calculateLoanState = (loan, asOf = todayStr()) => {
         interestDue = 0;
       }
     }
+
+    rows.push({
+      ...event,
+      label,
+      amount,
+      balance: event.type === "settlement" ? 0 : currentBalance(),
+      note: event.note || (event.generated ? "Auto monthly interest" : "-"),
+    });
   });
 
+  return { rows, principal, interestDue, compoundBalance, lastInterestDate, status, totalBalance: currentBalance() };
+};
+
+const calculateLoanState = (loan, asOf = todayStr()) => {
+  const ledger = buildLoanLedgerRows(loan, asOf);
+  const { principal, interestDue, compoundBalance, lastInterestDate, status, totalBalance } = ledger;
   const base = loan.interestType === "compound" ? compoundBalance : principal;
-  const totalBalance = loan.interestType === "compound" ? compoundBalance : round2(principal + interestDue);
   const monthlyInterest = round2(base * ((parseFloat(loan.rate) || 0) / 100));
-  const monthsDue = monthDiff(lastInterestDate || loan.startDate, asOf);
-  const projectedInterest = round2(monthlyInterest * Math.max(1, monthsDue || 1));
   const partialDays = daysBetween(lastInterestDate || loan.startDate, asOf);
   const settlementInterest = round2(base * ((parseFloat(loan.rate) || 0) / 100) * (partialDays / 30));
   const settlementAmount = round2(totalBalance + settlementInterest);
@@ -212,12 +253,13 @@ const calculateLoanState = (loan, asOf = todayStr()) => {
     compoundBalance,
     totalBalance,
     monthlyInterest,
-    projectedInterest,
+    projectedInterest: monthlyInterest,
     settlementInterest,
     settlementAmount,
     lastInterestDate,
     nextInterestDate: addMonthsISO(lastInterestDate || loan.startDate, 1),
     status,
+    ledgerRows: ledger.rows,
   };
 };
 
@@ -1583,6 +1625,56 @@ export default function MilkLedger() {
     shareAsText("Milk Ledger History", text);
   };
 
+  const exportLoanStatementCSV = async (loan) => {
+    const borrower = borrowerById(loan.borrowerId);
+    const state = calculateLoanState(loan);
+    const esc = (v) => {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [
+      ["Borrower", borrower?.name || "Unknown"].map(esc).join(","),
+      ["Phone", borrower?.phone || ""].map(esc).join(","),
+      ["Loan Start", loan.startDate].map(esc).join(","),
+      ["Interest Type", loan.interestType].map(esc).join(","),
+      ["Monthly Rate", `${loan.rate}%`].map(esc).join(","),
+      ["Current Balance", round2(state.totalBalance)].map(esc).join(","),
+      "",
+      ["Date", "Type", "Amount", "Balance", "Note"].join(","),
+      ...[...(state.ledgerRows || [])].map((row) => [
+        row.date,
+        row.label || row.type,
+        round2(row.amount),
+        round2(row.balance),
+        row.note || "",
+      ].map(esc).join(",")),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    await shareBlobAsFile(blob, `${(borrower?.name || "borrower").replace(/[^\w-]+/g, "_")}_loan_statement_${todayStr()}.csv`, "Loan Statement");
+  };
+
+  const shareLoanStatementText = (loan) => {
+    const borrower = borrowerById(loan.borrowerId);
+    const state = calculateLoanState(loan);
+    const rows = state.ledgerRows || [];
+    const text = [
+      "LOAN STATEMENT",
+      `Borrower: ${borrower?.name || "Unknown"}`,
+      borrower?.phone ? `Phone: ${borrower.phone}` : null,
+      `Start Date: ${fmtDate(loan.startDate)}`,
+      `Interest: ${loan.interestType === "compound" ? "Compound" : "Simple"} @ ${loan.rate}% monthly`,
+      `Principal: ₹${round2(loan.principal)}`,
+      `Current Balance: ₹${round2(state.totalBalance)}`,
+      `Settlement Today: ₹${round2(state.settlementAmount)}`,
+      "",
+      "Recent Progress:",
+      ...rows.slice(-12).map((row) => `${fmtDate(row.date)} | ${row.label || row.type} | ₹${round2(row.amount)} | Bal ₹${round2(row.balance)}`),
+      rows.length > 12 ? "" : null,
+      rows.length > 12 ? `Full CSV statement includes ${rows.length} rows.` : null,
+    ].filter(Boolean).join("\n");
+    shareAsText(`${borrower?.name || "Borrower"} Loan Statement`, text);
+  };
+
   // ---------- Assistant: local answers (fast, no API, always accurate) ----------
   const findCustomerMatches = (nameGuess, flowHint) => {
     if (!nameGuess) return [];
@@ -2326,6 +2418,8 @@ Sentence: "${text}"`;
             onDeposit={() => setLendingDialog("deposit")}
             onPostInterest={() => setLendingDialog("interest")}
             onSettle={() => setLendingDialog("settle")}
+            onExportLoan={exportLoanStatementCSV}
+            onShareLoan={shareLoanStatementText}
           />
         )}
 
@@ -3175,6 +3269,7 @@ function LendingView({
   borrowers, loans, search, setSearch, viewingBorrower, viewingLoan,
   setViewingBorrower, setViewingLoan, openBorrower, borrowerById, loansForBorrower,
   onNewBorrower, onNewLoan, onDeposit, onPostInterest, onSettle,
+  onExportLoan, onShareLoan,
 }) {
   const filtered = borrowers.filter((b) => {
     const q = search.trim().toLowerCase();
@@ -3193,7 +3288,7 @@ function LendingView({
   if (viewingLoan) {
     const borrower = borrowerById(viewingLoan.borrowerId);
     const state = calculateLoanState(viewingLoan);
-    const rows = [...(viewingLoan.entries || [])].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || 0) - (a.createdAt || 0));
+    const rows = [...(state.ledgerRows || [])].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || 0) - (a.createdAt || 0));
     return (
       <div>
         <button onClick={() => setViewingLoan(null)} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
@@ -3211,7 +3306,7 @@ function LendingView({
           </div>
           <div className="grid grid-cols-2 gap-2 mt-4">
             <StatCard label="Current Balance" value={`₹${round2(state.totalBalance)}`} accent="#215464" />
-            <StatCard label="Projected Interest" value={`₹${round2(state.projectedInterest)}`} sub={`Next: ${fmtDate(state.nextInterestDate)}`} accent="#a1690a" />
+            <StatCard label="Next Interest" value={`₹${round2(state.projectedInterest)}`} sub={`Next: ${fmtDate(state.nextInterestDate)}`} accent="#a1690a" />
             <StatCard label="Principal" value={`₹${round2(state.principal)}`} />
             <StatCard label="Settlement Today" value={`₹${round2(state.settlementAmount)}`} accent="#b3391f" />
           </div>
@@ -3231,32 +3326,36 @@ function LendingView({
             <button onClick={onSettle} className="py-2.5 rounded-xl text-white text-xs font-semibold" style={{ background: "#b3391f" }}>Settle</button>
           </div>
         )}
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <button onClick={() => onExportLoan(viewingLoan)} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600 flex items-center justify-center gap-1.5">
+            <Download size={14} /> CSV Statement
+          </button>
+          <button onClick={() => onShareLoan(viewingLoan)} className="py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600 flex items-center justify-center gap-1.5">
+            <Share2 size={14} /> Share Progress
+          </button>
+        </div>
 
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Loan Ledger</div>
           <div className="txn-table-wrap overflow-x-auto">
-            <table className="min-w-[680px] w-full text-[12px]">
+            <table className="min-w-[820px] w-full text-[12px]">
               <thead className="bg-slate-50 text-slate-500 text-left">
                 <tr>
                   <th className="px-3 py-2">Date</th>
                   <th className="px-3 py-2">Type</th>
                   <th className="px-3 py-2">Amount</th>
                   <th className="px-3 py-2">Note</th>
+                  <th className="px-3 py-2 text-right">Balance</th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="bg-amber-50/60">
-                  <td className="px-3 py-2">{fmtDate(state.nextInterestDate)}</td>
-                  <td className="px-3 py-2 font-semibold text-amber-700">Projected</td>
-                  <td className="px-3 py-2 font-semibold text-amber-700">₹{state.projectedInterest}</td>
-                  <td className="px-3 py-2 text-slate-500">Not posted yet</td>
-                </tr>
                 {rows.map((entry) => (
-                  <tr key={entry.id} className="border-t border-slate-100">
+                  <tr key={entry.id} className={`border-t border-slate-100 ${entry.generated ? "bg-amber-50/40" : ""}`}>
                     <td className="px-3 py-2 whitespace-nowrap">{fmtDate(entry.date)}</td>
-                    <td className="px-3 py-2 capitalize">{entry.type}</td>
+                    <td className="px-3 py-2 capitalize">{entry.label || entry.type}{entry.generated ? " (auto)" : ""}</td>
                     <td className="px-3 py-2 font-semibold">₹{round2(entry.amount)}</td>
                     <td className="px-3 py-2 text-slate-500">{entry.note || "-"}</td>
+                    <td className="px-3 py-2 text-right font-bold text-slate-800">₹{round2(entry.balance)}</td>
                   </tr>
                 ))}
               </tbody>

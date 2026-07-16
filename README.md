@@ -64,6 +64,7 @@ Each borrower can have one or more loan accounts. Loan accounts support:
 - Deposits/payments
 - Monthly interest posting
 - Settlement calculation
+- CSV statement export and shareable progress summary
 
 For simple interest, deposits clear posted interest first and then reduce principal. For compound interest, posted interest is added to the running balance and deposits reduce that balance.
 

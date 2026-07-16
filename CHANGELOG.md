@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.1
+
+- Updated loan ledgers to auto-display every monthly interest row from the loan start date through today.
+- Added a running balance column to the loan ledger table.
+- Updated simple/compound loan balances so old accounts reflect accumulated monthly interest instead of a single projected row.
+- Added loan statement sharing/export for full loan progress.
+
 ## v0.3.0
 
 - Added a new Lending tab for borrower profiles and interest-based loan accounts.
