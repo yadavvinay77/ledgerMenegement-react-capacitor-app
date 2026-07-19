@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.0
+
+- Added explicit Apply and Clear buttons for dashboard and party statement date filters.
+- Added assistant voice input, voice reply toggle, and replay buttons for assistant responses.
+- Expanded assistant quick actions for purchase/sale entries, payments, lending navigation, summaries, and statement guidance.
+- Added edit actions for lending borrower profiles and loan details, including principal, rate, interest type, guarantor, collateral, and notes.
+- Improved sharing feedback and capped JPG statement rendering for faster Android sharing while keeping full-detail PDF/CSV statements.
+
 ## v0.3.2
 
 - Updated simple-interest loan methodology so deposits reduce the active interest base and added principal increases it for future monthly rows.

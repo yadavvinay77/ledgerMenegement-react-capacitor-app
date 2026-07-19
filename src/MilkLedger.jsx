@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Plus, Search, X, Droplet, Users, History, LayoutDashboard, Settings as SettingsIcon, ChevronRight, Phone, Check, ArrowDownCircle, ArrowUpCircle, Receipt, Pencil, Trash2, Printer, ArrowLeft, Wallet, CalendarDays, ShoppingBag, Download, Share2, Filter, MessageCircle, Send, Loader2, Sparkles, Image as ImageIcon, Building2, CloudUpload, CloudDownload, Fingerprint, Languages, ScrollText, LockKeyhole, UserCircle2 } from "lucide-react";
+import { Plus, Search, X, Droplet, Users, History, LayoutDashboard, Settings as SettingsIcon, ChevronRight, Phone, Check, ArrowDownCircle, ArrowUpCircle, Receipt, Pencil, Trash2, Printer, ArrowLeft, Wallet, CalendarDays, ShoppingBag, Download, Share2, Filter, MessageCircle, Send, Loader2, Sparkles, Image as ImageIcon, Building2, CloudUpload, CloudDownload, Fingerprint, Languages, ScrollText, LockKeyhole, UserCircle2, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { Share } from "@capacitor/share";
 import { Filesystem, Directory, Encoding } from "@capacitor/filesystem";
@@ -307,6 +307,8 @@ export default function MilkLedger() {
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [dateFromDraft, setDateFromDraft] = useState("");
+  const [dateToDraft, setDateToDraft] = useState("");
   const [lendingSearch, setLendingSearch] = useState("");
   const [viewingBorrower, setViewingBorrower] = useState(null);
   const [viewingLoan, setViewingLoan] = useState(null);
@@ -340,6 +342,9 @@ export default function MilkLedger() {
   const [chatLoading, setChatLoading] = useState(false);
   const [assistantView, setAssistantView] = useState("chat"); // "chat" | "pickParty"
   const [pickPartyFlow, setPickPartyFlow] = useState("purchase");
+  const [voiceReplyEnabled, setVoiceReplyEnabled] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
   const [pickPartyThen, setPickPartyThen] = useState(null); // "milk" | "money" — what to open after picking
 
   useEffect(() => {
@@ -530,6 +535,17 @@ export default function MilkLedger() {
     logActivity("lending", `Added borrower: ${borrower.name}`);
   };
 
+  const updateBorrowerProfile = async (draft) => {
+    if (!viewingBorrower) return;
+    const updated = { ...viewingBorrower, ...draft, updatedAt: Date.now() };
+    const next = borrowers.map((borrower) => borrower.id === viewingBorrower.id ? updated : borrower);
+    await persist.borrowers(next);
+    setViewingBorrower(updated);
+    setLendingDialog(null);
+    showToast("Borrower updated");
+    logActivity("lending", `Updated borrower: ${updated.name}`);
+  };
+
   const saveLoan = async (draft) => {
     const amount = round2(parseFloat(draft.principal) || 0);
     if (!viewingBorrower || amount <= 0) return;
@@ -562,6 +578,39 @@ export default function MilkLedger() {
     setLendingDialog(null);
     showToast("Loan account created");
     logActivity("lending", `Created loan for ${viewingBorrower.name}: ₹${amount}`);
+  };
+
+  const updateLoanDetails = async (draft) => {
+    if (!viewingLoan) return;
+    const amount = round2(parseFloat(draft.principal) || 0);
+    if (amount <= 0) return;
+    const next = loans.map((loan) => {
+      if (loan.id !== viewingLoan.id) return loan;
+      const entries = (loan.entries || []).map((entry) => (
+        entry.type === "disbursement"
+          ? { ...entry, date: draft.startDate || loan.startDate, amount, note: entry.note || "Loan principal" }
+          : entry
+      ));
+      return {
+        ...loan,
+        principal: amount,
+        startDate: draft.startDate || loan.startDate,
+        interestType: draft.interestType || loan.interestType,
+        rate: parseFloat(draft.rate) || 0,
+        durationMonths: draft.durationMonths ? parseInt(draft.durationMonths, 10) : null,
+        guarantorName: draft.guarantorName || "",
+        guarantorPhone: draft.guarantorPhone || "",
+        collateral: draft.collateral || "",
+        notes: draft.notes || "",
+        entries,
+        updatedAt: Date.now(),
+      };
+    });
+    await persist.loans(next);
+    refreshViewingLoan(next);
+    setLendingDialog(null);
+    showToast("Loan details updated");
+    logActivity("lending", `Updated loan for ${borrowerById(viewingLoan.borrowerId)?.name || "borrower"}`);
   };
 
   const updateLoan = async (loanId, updater) => {
@@ -675,6 +724,8 @@ export default function MilkLedger() {
     setShowDateFilter(false);
     setDateFrom("");
     setDateTo("");
+    setDateFromDraft("");
+    setDateToDraft("");
   };
 
   // Assistant-driven navigation — can jump straight to a pre-applied date range.
@@ -684,10 +735,14 @@ export default function MilkLedger() {
     if (range) {
       setDateFrom(range.from);
       setDateTo(range.to);
+      setDateFromDraft(range.from);
+      setDateToDraft(range.to);
       setShowDateFilter(true);
     } else {
       setDateFrom("");
       setDateTo("");
+      setDateFromDraft("");
+      setDateToDraft("");
       setShowDateFilter(false);
     }
   };
@@ -1241,6 +1296,8 @@ export default function MilkLedger() {
   // Print → Save as PDF.
   const generateTableImageBlob = (rows, { title, subtitle, showParty, previousBalance, totals, flowColorHex }) => {
     return new Promise((resolve) => {
+      const imageRows = rows.length > 60 ? rows.slice(0, 60) : rows;
+      const omittedRows = Math.max(0, rows.length - imageRows.length);
       const scale = 2;
       const pad = 24;
       const headerH = 86;
@@ -1291,7 +1348,7 @@ export default function MilkLedger() {
 
       const prevRowCount = previousBalance != null ? 1 : 0;
       const totalRowCount = totals ? 1 : 0;
-      const bodyRows = rows.length + prevRowCount + totalRowCount;
+      const bodyRows = imageRows.length + prevRowCount + totalRowCount + (omittedRows ? 1 : 0);
       const height = headerH + colHeaderH + bodyRows * rowH + pad;
 
       const canvas = document.createElement("canvas");
@@ -1346,7 +1403,7 @@ export default function MilkLedger() {
         drawLine();
       }
 
-      rows.forEach((t) => {
+      imageRows.forEach((t) => {
         const isMoney = t.kind === "money";
         const isItem = t.kind === "item";
         const itemText = isMoney ? "Money" : isItem ? t.itemName : t.category;
@@ -1369,6 +1426,12 @@ export default function MilkLedger() {
         y += rowH;
         drawLine();
       });
+
+      if (omittedRows) {
+        cell(`${omittedRows} more rows are included in PDF/CSV`, idx("sr"), { bold: true, color: "#64748b" });
+        y += rowH;
+        drawLine();
+      }
 
       if (totals) {
         ctx.fillStyle = "#f8fafc";
@@ -1521,6 +1584,7 @@ export default function MilkLedger() {
   // falling back to browser file sharing/download for web preview.
   const shareBlobAsFile = async (blob, filename, title) => {
     if (!blob) { showToast("Couldn't generate the file"); return; }
+    showToast("Preparing share file...");
     const data = await blobToBase64(blob);
     if (await shareNativeFile({
       title,
@@ -2130,6 +2194,65 @@ Sentence: "${text}"`;
     }
   };
 
+  const VOICE_LOCALE = { en: "en-IN", gu: "gu-IN", hi: "hi-IN" };
+
+  const speakText = (text) => {
+    const speech = window.speechSynthesis;
+    if (!speech) {
+      showToast("Voice reply is not supported on this device");
+      return;
+    }
+    try {
+      speech.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = VOICE_LOCALE[lang] || "en-IN";
+      utter.rate = 1;
+      speech.speak(utter);
+    } catch {
+      showToast("Could not play voice reply");
+    }
+  };
+
+  const pushAssistantMessage = (text) => {
+    setChatMessages((m) => [...m, { role: "assistant", text }]);
+    if (voiceReplyEnabled) speakText(text);
+  };
+
+  const startListening = () => {
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionAPI) {
+      showToast("Voice input is not supported on this device");
+      return;
+    }
+    try {
+      const recog = new SpeechRecognitionAPI();
+      recog.lang = VOICE_LOCALE[lang] || "en-IN";
+      recog.interimResults = false;
+      recog.maxAlternatives = 1;
+      recog.onresult = (event) => {
+        const transcript = event.results?.[0]?.[0]?.transcript;
+        setIsListening(false);
+        if (transcript) sendChatMessage(transcript);
+      };
+      recog.onerror = (event) => {
+        setIsListening(false);
+        showToast(event.error === "no-speech" ? "Did not catch that" : "Voice input is not available");
+      };
+      recog.onend = () => setIsListening(false);
+      recognitionRef.current = recog;
+      recog.start();
+      setIsListening(true);
+    } catch {
+      setIsListening(false);
+      showToast("Could not start voice input");
+    }
+  };
+
+  const stopListening = () => {
+    try { recognitionRef.current?.stop(); } catch {}
+    setIsListening(false);
+  };
+
   const buildDraftFromParsed = (parsed) => {
     const flow = parsed.flow || "purchase";
     const matches = findCustomerMatches(parsed.customerName, flow);
@@ -2180,7 +2303,7 @@ Sentence: "${text}"`;
       };
     }
     await saveTransaction(txn);
-    setChatMessages((m) => [...m, { role: "assistant", text: `Saved ✓ ${cust.name} · ₹${amount} · ${STATUS_META[draft.status].label}` }]);
+    pushAssistantMessage(`Saved - ${cust.name} - Rs ${amount} - ${STATUS_META[draft.status].label}`);
     showToast("Logged via Assistant");
   };
 
@@ -2201,7 +2324,7 @@ Sentence: "${text}"`;
     if (stmt) {
       if (stmt.matches.length === 1) {
         const rangeLabel = stmt.range ? `${fmtDate(stmt.range.from)} to ${fmtDate(stmt.range.to)}` : "full history";
-        setChatMessages((m) => [...m, { role: "assistant", text: `Opening ${stmt.matches[0].name}'s statement for ${rangeLabel}.` }]);
+        pushAssistantMessage(`Opening ${stmt.matches[0].name}'s statement for ${rangeLabel}.`);
         openPartyStatement(stmt.matches[0], stmt.range);
         return;
       }
@@ -2209,13 +2332,13 @@ Sentence: "${text}"`;
         setChatMessages((m) => [...m, { role: "statementPick", candidates: stmt.matches, range: stmt.range }]);
         return;
       }
-      setChatMessages((m) => [...m, { role: "assistant", text: "I couldn't find that party by name — check the spelling, or open them from the Parties tab." }]);
+      pushAssistantMessage("I could not find that party by name. Check the spelling, or open them from the Parties tab.");
       return;
     }
 
     const local = localQuickAnswer(text);
     if (local) {
-      setChatMessages((m) => [...m, { role: "assistant", text: local }]);
+      pushAssistantMessage(local);
       return;
     }
 
@@ -2224,7 +2347,7 @@ Sentence: "${text}"`;
     setChatLoading(false);
 
     if (!parsed || parsed.intent !== "log_transaction") {
-      setChatMessages((m) => [...m, { role: "assistant", text: "I couldn't quite parse that as an entry. Try e.g. \"bought 10 ltr sample 240 rate 200 from Suresh credit\", \"give me Vinay's statement\", or use a quick action below." }]);
+      pushAssistantMessage("I could not parse that as an entry. Try: bought 10 ltr sample 240 rate 200 from Suresh credit, give me Vinay statement, or tap a quick action.");
       return;
     }
     const draft = buildDraftFromParsed(parsed);
@@ -2364,7 +2487,11 @@ Sentence: "${text}"`;
             <div className="flex items-center justify-between mb-2 print:hidden">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Statement</div>
               <button
-                onClick={() => setShowDateFilter((v) => !v)}
+                onClick={() => {
+                  setDateFromDraft(dateFrom);
+                  setDateToDraft(dateTo);
+                  setShowDateFilter((v) => !v);
+                }}
                 className="flex items-center gap-1 text-xs font-medium text-slate-500"
               >
                 <Filter size={13} /> {partyStatement.hasFilter ? "Filtered" : "Filter"}
@@ -2378,8 +2505,8 @@ Sentence: "${text}"`;
                     <div className="text-[10px] text-slate-400 mb-1">From</div>
                     <input
                       type="date"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
+                      value={dateFromDraft}
+                      onChange={(e) => setDateFromDraft(e.target.value)}
                       className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none"
                     />
                   </div>
@@ -2387,20 +2514,37 @@ Sentence: "${text}"`;
                     <div className="text-[10px] text-slate-400 mb-1">To</div>
                     <input
                       type="date"
-                      value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
+                      value={dateToDraft}
+                      onChange={(e) => setDateToDraft(e.target.value)}
                       className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none"
                     />
                   </div>
                 </div>
-                {partyStatement.hasFilter && (
+                <div className="grid grid-cols-2 gap-2">
                   <button
-                    onClick={() => { setDateFrom(""); setDateTo(""); }}
-                    className="text-xs font-medium text-slate-400 underline"
+                    onClick={() => {
+                      setDateFrom(dateFromDraft);
+                      setDateTo(dateToDraft);
+                      setShowDateFilter(false);
+                    }}
+                    className="py-2 rounded-lg text-white text-xs font-semibold"
+                    style={{ background: FLOW_META[viewingParty.flow].color }}
                   >
-                    Clear filter
+                    Apply
                   </button>
-                )}
+                  <button
+                    onClick={() => {
+                      setDateFrom("");
+                      setDateTo("");
+                      setDateFromDraft("");
+                      setDateToDraft("");
+                      setShowDateFilter(false);
+                    }}
+                    className="py-2 rounded-lg bg-slate-100 text-slate-500 text-xs font-semibold"
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
             )}
 
@@ -2659,6 +2803,8 @@ Sentence: "${text}"`;
             onPrincipalAdd={() => setLendingDialog("principal")}
             onPostInterest={() => setLendingDialog("interest")}
             onSettle={() => setLendingDialog("settle")}
+            onEditBorrower={() => setLendingDialog("editBorrower")}
+            onEditLoan={() => setLendingDialog("editLoan")}
             onDeleteBorrower={(borrower) => setLendingDeleteTarget({ type: "borrower", borrower })}
             onDeleteLoan={(loan) => setLendingDeleteTarget({ type: "loan", loan })}
             onExportLoan={exportLoanStatementCSV}
@@ -3345,8 +3491,16 @@ Sentence: "${text}"`;
         <BorrowerDialog onClose={() => setLendingDialog(null)} onSave={saveBorrower} />
       )}
 
+      {lendingDialog === "editBorrower" && viewingBorrower && (
+        <BorrowerDialog existing={viewingBorrower} onClose={() => setLendingDialog(null)} onSave={updateBorrowerProfile} />
+      )}
+
       {lendingDialog === "loan" && viewingBorrower && (
         <LoanDialog borrower={viewingBorrower} onClose={() => setLendingDialog(null)} onSave={saveLoan} />
+      )}
+
+      {lendingDialog === "editLoan" && viewingLoan && (
+        <LoanDialog borrower={borrowerById(viewingLoan.borrowerId) || { name: "Borrower" }} existing={viewingLoan} onClose={() => setLendingDialog(null)} onSave={updateLoanDetails} />
       )}
 
       {lendingDialog === "deposit" && viewingLoan && (
@@ -3434,12 +3588,28 @@ Sentence: "${text}"`;
           title={
             <span className="flex items-center gap-1.5">
               <Sparkles size={15} className="text-[#215464]" /> Assistant
+              <button
+                onClick={() => setVoiceReplyEnabled((v) => !v)}
+                className="ml-1 w-6 h-6 rounded-full flex items-center justify-center"
+                style={{ background: voiceReplyEnabled ? "#21546420" : "#f1f5f9", color: voiceReplyEnabled ? "#215464" : "#94a3b8" }}
+                title={voiceReplyEnabled ? "Voice replies on" : "Voice replies off"}
+              >
+                {voiceReplyEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+              </button>
             </span>
           }
-          onClose={() => { setShowAssistant(false); setAssistantView("chat"); }}
+          onClose={() => { setShowAssistant(false); setAssistantView("chat"); if (isListening) stopListening(); window.speechSynthesis?.cancel(); }}
           footer={
             assistantView === "chat" ? (
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => (isListening ? stopListening() : startListening())}
+                  className="w-11 h-11 rounded-lg flex items-center justify-center shrink-0"
+                  style={isListening ? { background: "#dc2626" } : { background: "#f1f5f9" }}
+                  title={isListening ? "Stop listening" : "Speak your entry"}
+                >
+                  {isListening ? <MicOff size={17} className="text-white" /> : <Mic size={17} className="text-slate-500" />}
+                </button>
                 <input
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
@@ -3493,11 +3663,23 @@ Sentence: "${text}"`;
                 <button onClick={() => openPartyPicker("sale", "milk")} className="py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5" style={{ background: FLOW_META.sale.color + "1A", color: FLOW_META.sale.color }}>
                   <ShoppingBag size={14} /> Log Sale
                 </button>
+                <button onClick={() => openPartyPicker("purchase", "money")} className="py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 bg-slate-100 text-slate-600">
+                  <Wallet size={14} /> Purchase Payment
+                </button>
+                <button onClick={() => openPartyPicker("sale", "money")} className="py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 bg-slate-100 text-slate-600">
+                  <Wallet size={14} /> Sale Payment
+                </button>
                 <button onClick={() => sendChatMessage("today's summary")} className="py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 bg-slate-100 text-slate-600">
                   <LayoutDashboard size={14} /> Today's Summary
                 </button>
                 <button onClick={() => sendChatMessage("outstanding dues")} className="py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 bg-slate-100 text-slate-600">
                   <Wallet size={14} /> Outstanding Dues
+                </button>
+                <button onClick={() => { setShowAssistant(false); setTab("lending"); }} className="py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 bg-slate-100 text-slate-600">
+                  <Wallet size={14} /> Lending
+                </button>
+                <button onClick={() => pushAssistantMessage("Say or type: generate statement for Ramesh this month. I will open the matching statement with the date range applied.")} className="py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 bg-slate-100 text-slate-600">
+                  <Printer size={14} /> Statement Help
                 </button>
               </div>
 
@@ -3524,8 +3706,13 @@ Sentence: "${text}"`;
                       </div>
                     </div>
                   ) : (
-                    <div key={i} className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm whitespace-pre-line ${m.role === "user" ? "self-end bg-[#215464] text-white rounded-br-sm" : "self-start bg-slate-100 text-slate-700 rounded-bl-sm"}`}>
-                      {m.text}
+                    <div key={i} className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm whitespace-pre-line flex items-end gap-1.5 ${m.role === "user" ? "self-end bg-[#215464] text-white rounded-br-sm" : "self-start bg-slate-100 text-slate-700 rounded-bl-sm"}`}>
+                      <span>{m.text}</span>
+                      {m.role === "assistant" && (
+                        <button onClick={() => speakText(m.text)} className="shrink-0 text-slate-400 active:text-slate-600" title="Play voice reply">
+                          <Volume2 size={13} />
+                        </button>
+                      )}
                     </div>
                   )
                 )}
@@ -3548,7 +3735,7 @@ function LendingView({
   borrowers, loans, search, setSearch, viewingBorrower, viewingLoan,
   setViewingBorrower, setViewingLoan, openBorrower, borrowerById, loansForBorrower,
   onNewBorrower, onNewLoan, onDeposit, onPrincipalAdd, onPostInterest, onSettle,
-  onDeleteBorrower, onDeleteLoan, onExportLoan, onShareLoan, onShareLoanPdf, onShareLoanImage,
+  onEditBorrower, onEditLoan, onDeleteBorrower, onDeleteLoan, onExportLoan, onShareLoan, onShareLoanPdf, onShareLoanImage,
 }) {
   const filtered = borrowers.filter((b) => {
     const q = search.trim().toLowerCase();
@@ -3583,6 +3770,9 @@ function LendingView({
               <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${viewingLoan.status === "settled" ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
                 {viewingLoan.status === "settled" ? "Settled" : "Active"}
               </span>
+              <button onClick={onEditLoan} className="w-9 h-9 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center" title="Edit loan">
+                <Pencil size={15} />
+              </button>
               <button onClick={() => onDeleteLoan(viewingLoan)} className="w-9 h-9 rounded-lg bg-red-50 text-red-600 flex items-center justify-center" title="Delete loan">
                 <Trash2 size={15} />
               </button>
@@ -3672,6 +3862,9 @@ function LendingView({
               {viewingBorrower.address && <div className="text-xs text-slate-400 mt-1">{viewingBorrower.address}</div>}
             </div>
             <div className="flex items-center gap-2">
+              <button onClick={onEditBorrower} className="w-9 h-9 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center" title="Edit borrower">
+                <Pencil size={15} />
+              </button>
               <button onClick={() => onDeleteBorrower(viewingBorrower)} className="w-9 h-9 rounded-lg bg-red-50 text-red-600 flex items-center justify-center" title="Delete borrower">
                 <Trash2 size={15} />
               </button>
@@ -3764,6 +3957,8 @@ function Dashboard({ dashboard, transactions, customerById, srNoMap, onInvoice, 
   const { todayPurchase, todaySale, byStatus, days, topDebtors, outstanding, netToday } = dashboard;
   const [dateFrom, setDateFrom] = useState(todayStr());
   const [dateTo, setDateTo] = useState(todayStr());
+  const [draftFrom, setDraftFrom] = useState(todayStr());
+  const [draftTo, setDraftTo] = useState(todayStr());
 
   const dateRows = useMemo(() => {
     return transactions
@@ -3889,7 +4084,7 @@ function Dashboard({ dashboard, transactions, customerById, srNoMap, onInvoice, 
             ].map((q) => (
               <button
                 key={q.label}
-                onClick={() => { setDateFrom(q.from); setDateTo(q.to); }}
+                onClick={() => { setDraftFrom(q.from); setDraftTo(q.to); setDateFrom(q.from); setDateTo(q.to); }}
                 className="text-[10px] font-semibold px-2 py-1 rounded-md bg-white border border-slate-200 text-slate-500"
               >
                 {q.label}
@@ -3902,8 +4097,8 @@ function Dashboard({ dashboard, transactions, customerById, srNoMap, onInvoice, 
             <CalendarDays size={13} className="text-slate-400 shrink-0" />
             <input
               type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
+              value={draftFrom}
+              onChange={(e) => setDraftFrom(e.target.value)}
               className="text-xs outline-none bg-transparent w-full"
             />
           </div>
@@ -3911,11 +4106,26 @@ function Dashboard({ dashboard, transactions, customerById, srNoMap, onInvoice, 
             <CalendarDays size={13} className="text-slate-400 shrink-0" />
             <input
               type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
+              value={draftTo}
+              onChange={(e) => setDraftTo(e.target.value)}
               className="text-xs outline-none bg-transparent w-full"
             />
           </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-3 print:hidden">
+          <button
+            onClick={() => { setDateFrom(draftFrom || todayStr()); setDateTo(draftTo || draftFrom || todayStr()); }}
+            className="py-2 rounded-lg text-white text-xs font-semibold"
+            style={{ background: "#215464" }}
+          >
+            Apply
+          </button>
+          <button
+            onClick={() => { const today = todayStr(); setDraftFrom(today); setDraftTo(today); setDateFrom(today); setDateTo(today); }}
+            className="py-2 rounded-lg bg-slate-100 text-slate-500 text-xs font-semibold"
+          >
+            Clear
+          </button>
         </div>
         {dateRows.length === 0 ? (
           <div className="text-center text-slate-400 text-sm py-8 bg-white rounded-xl border border-slate-200">
@@ -4420,17 +4630,17 @@ const Row = ({ label, value }) => (
     <td className="py-1.5 text-slate-800 font-medium text-right">{value}</td>
   </tr>
 );
-function BorrowerDialog({ onClose, onSave }) {
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
-  const [idRef, setIdRef] = useState("");
-  const [notes, setNotes] = useState("");
+function BorrowerDialog({ existing, onClose, onSave }) {
+  const [name, setName] = useState(existing?.name || "");
+  const [phone, setPhone] = useState(existing?.phone || "");
+  const [address, setAddress] = useState(existing?.address || "");
+  const [idRef, setIdRef] = useState(existing?.idRef || "");
+  const [notes, setNotes] = useState(existing?.notes || "");
 
   return (
-    <Modal title="Add Borrower" onClose={onClose} footer={
+    <Modal title={existing ? "Edit Borrower" : "Add Borrower"} onClose={onClose} footer={
       <button disabled={!name.trim()} onClick={() => onSave({ name: name.trim(), phone: phone.trim(), address: address.trim(), idRef: idRef.trim(), notes: notes.trim() })} className="w-full py-3 rounded-xl text-white font-medium disabled:opacity-40" style={{ background: "#215464" }}>
-        Save Borrower
+        {existing ? "Update Borrower" : "Save Borrower"}
       </button>
     }>
       <Field label="Full Name"><input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
@@ -4442,21 +4652,21 @@ function BorrowerDialog({ onClose, onSave }) {
   );
 }
 
-function LoanDialog({ borrower, onClose, onSave }) {
-  const [startDate, setStartDate] = useState(todayStr());
-  const [principal, setPrincipal] = useState("");
-  const [interestType, setInterestType] = useState("simple");
-  const [rate, setRate] = useState("2");
-  const [durationMonths, setDurationMonths] = useState("");
-  const [guarantorName, setGuarantorName] = useState("");
-  const [guarantorPhone, setGuarantorPhone] = useState("");
-  const [collateral, setCollateral] = useState("");
-  const [notes, setNotes] = useState("");
+function LoanDialog({ borrower, existing, onClose, onSave }) {
+  const [startDate, setStartDate] = useState(existing?.startDate || todayStr());
+  const [principal, setPrincipal] = useState(existing ? String(existing.principal || "") : "");
+  const [interestType, setInterestType] = useState(existing?.interestType || "simple");
+  const [rate, setRate] = useState(existing ? String(existing.rate ?? "") : "2");
+  const [durationMonths, setDurationMonths] = useState(existing?.durationMonths ? String(existing.durationMonths) : "");
+  const [guarantorName, setGuarantorName] = useState(existing?.guarantorName || "");
+  const [guarantorPhone, setGuarantorPhone] = useState(existing?.guarantorPhone || "");
+  const [collateral, setCollateral] = useState(existing?.collateral || "");
+  const [notes, setNotes] = useState(existing?.notes || "");
 
   return (
-    <Modal title={`New Loan - ${borrower.name}`} onClose={onClose} footer={
+    <Modal title={`${existing ? "Edit Loan" : "New Loan"} - ${borrower.name}`} onClose={onClose} footer={
       <button disabled={!(parseFloat(principal) > 0) || !(parseFloat(rate) >= 0)} onClick={() => onSave({ startDate, principal, interestType, rate, durationMonths, guarantorName, guarantorPhone, collateral, notes })} className="w-full py-3 rounded-xl text-white font-medium disabled:opacity-40" style={{ background: "#215464" }}>
-        Save Loan
+        {existing ? "Update Loan" : "Save Loan"}
       </button>
     }>
       <Field label="Date Given"><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none" /></Field>
