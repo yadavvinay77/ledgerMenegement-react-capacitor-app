@@ -318,10 +318,11 @@ export default function MilkLedger() {
   const [showSeedConfirm, setShowSeedConfirm] = useState(false);
 
   // ---------- Account tab state ----------
-  const [accountView, setAccountView] = useState("menu"); // menu | profile | rates | backup | security | language | activity
-  const [businessProfile, setBusinessProfile] = useState({ businessName: "", ownerName: "", phone: "", address: "", regNo: "" });
-  const [profileInputs, setProfileInputs] = useState({ businessName: "", ownerName: "", phone: "", address: "", regNo: "" });
+  const [accountView, setAccountView] = useState("menu"); // menu | profile | rates | backup | security | language | activity | reports
+  const [businessProfile, setBusinessProfile] = useState({ businessName: "", ownerName: "", phone: "", address: "", regNo: "", logoUrl: "", signatureName: "" });
+  const [profileInputs, setProfileInputs] = useState({ businessName: "", ownerName: "", phone: "", address: "", regNo: "", logoUrl: "", signatureName: "" });
   const [activityLog, setActivityLog] = useState([]);
+  const [backupHistory, setBackupHistory] = useState([]);
   const [security, setSecurity] = useState({ pinEnabled: false, pinHash: "", biometricEnabled: false });
   const [locked, setLocked] = useState(false);
   const [pinEntry, setPinEntry] = useState("");
@@ -384,7 +385,7 @@ export default function MilkLedger() {
       } catch { setRates({ purchase: 200, sale: 220, saleItems: DEFAULT_SALE_ITEM_RATES, purchaseMatrix: DEFAULT_PURCHASE_RATE_MATRIX }); }
       try {
         const bp = await window.storage.get("businessProfile");
-        const parsedBp = bp ? JSON.parse(bp.value) : { businessName: "", ownerName: "", phone: "", address: "", regNo: "" };
+        const parsedBp = { businessName: "", ownerName: "", phone: "", address: "", regNo: "", logoUrl: "", signatureName: "", ...(bp ? JSON.parse(bp.value) : {}) };
         setBusinessProfile(parsedBp);
         setProfileInputs(parsedBp);
       } catch {}
@@ -392,6 +393,10 @@ export default function MilkLedger() {
         const al = await window.storage.get("activityLog");
         setActivityLog(al ? JSON.parse(al.value) : []);
       } catch { setActivityLog([]); }
+      try {
+        const bh = await window.storage.get("backupHistory");
+        setBackupHistory(bh ? JSON.parse(bh.value) : []);
+      } catch { setBackupHistory([]); }
       try {
         const sec = await window.storage.get("security");
         const parsedSec = sec ? JSON.parse(sec.value) : { pinEnabled: false, pinHash: "", biometricEnabled: false };
@@ -443,7 +448,12 @@ export default function MilkLedger() {
       try { await window.storage.set("businessProfile", JSON.stringify(p)); } catch {}
     },
     activityLog: async (list) => {
+      setActivityLog(list);
       try { await window.storage.set("activityLog", JSON.stringify(list)); } catch {}
+    },
+    backupHistory: async (list) => {
+      setBackupHistory(list);
+      try { await window.storage.set("backupHistory", JSON.stringify(list)); } catch {}
     },
     security: async (s) => {
       setSecurity(s);
@@ -903,14 +913,24 @@ export default function MilkLedger() {
     loans,
     rates,
     businessProfile,
+    accountPreferences: {
+      language: lang,
+      autoBackup,
+      security: { pinEnabled: security.pinEnabled, biometricEnabled: security.biometricEnabled },
+    },
+    activityLog,
+    backupHistory,
   });
 
   const downloadBackupFile = async () => {
     const payload = buildBackupPayload();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     await shareBlobAsFile(blob, `milk_ledger_backup_${todayStr()}.json`, "Milk Ledger Backup");
-    const next = { ...autoBackup, lastBackupAt: Date.now() };
+    const now = Date.now();
+    const next = { ...autoBackup, lastBackupAt: now };
     await persist.autoBackup(next);
+    const history = [{ id: uid(), ts: now, type: "manual", destination: "Android share sheet", filename: `milk_ledger_backup_${todayStr()}.json` }, ...backupHistory].slice(0, 25);
+    await persist.backupHistory(history);
     logActivity("backup", "Manual backup created");
   };
 
@@ -943,6 +963,10 @@ export default function MilkLedger() {
     if (Array.isArray(data.loans)) await persist.loans(data.loans);
     if (data.rates) { setRates(data.rates); await persist.settings(data.rates); }
     if (data.businessProfile) { await persist.businessProfile(data.businessProfile); }
+    if (data.accountPreferences?.language) await persist.language(data.accountPreferences.language);
+    if (data.accountPreferences?.autoBackup) await persist.autoBackup(data.accountPreferences.autoBackup);
+    if (Array.isArray(data.activityLog)) await persist.activityLog(data.activityLog);
+    if (Array.isArray(data.backupHistory)) await persist.backupHistory(data.backupHistory);
     setPendingRestore(null);
     showToast("Backup restored");
     logActivity("backup", `Restored backup from ${data.exportedAt ? fmtDate(data.exportedAt.slice(0, 10)) : "file"}`);
@@ -966,6 +990,45 @@ export default function MilkLedger() {
     const next = { ...autoBackup, ...patch };
     await persist.autoBackup(next);
     logActivity("settings", "Auto-backup settings updated");
+  };
+
+  const csvEscape = (value) => {
+    const text = String(value ?? "");
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  const shareTextFile = async (text, filename, title, mime = "text/plain;charset=utf-8;") => {
+    const blob = new Blob([text], { type: mime });
+    await shareBlobAsFile(blob, filename, title);
+  };
+
+  const exportActivityLog = async () => {
+    const lines = [
+      ["Timestamp", "Type", "Message"].map(csvEscape).join(","),
+      ...activityLog.map((entry) => [new Date(entry.ts).toISOString(), entry.type, entry.message].map(csvEscape).join(",")),
+    ];
+    await shareTextFile(lines.join("\n"), `milk_ledger_activity_${todayStr()}.csv`, "Milk Ledger Activity Log", "text/csv;charset=utf-8;");
+    logActivity("report", "Activity log exported");
+  };
+
+  const exportAccountSummary = async () => {
+    const summary = {
+      generatedAt: new Date().toISOString(),
+      businessProfile,
+      language: lang,
+      autoBackup,
+      security: { pinEnabled: security.pinEnabled, biometricEnabled: security.biometricEnabled },
+      totals: {
+        parties: customers.length,
+        transactions: transactions.length,
+        borrowers: borrowers.length,
+        loans: loans.length,
+        activityEvents: activityLog.length,
+        backups: backupHistory.length,
+      },
+    };
+    await shareTextFile(JSON.stringify(summary, null, 2), `milk_ledger_account_summary_${todayStr()}.json`, "Milk Ledger Account Summary", "application/json");
+    logActivity("report", "Account summary exported");
   };
 
   // ---------- Security / PIN lock ----------
@@ -2218,12 +2281,25 @@ Sentence: "${text}"`;
     if (voiceReplyEnabled) speakText(text);
   };
 
-  const startListening = () => {
+  const requestMicrophoneAccess = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) return true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      return true;
+    } catch {
+      showToast("Microphone permission is required for voice input");
+      return false;
+    }
+  };
+
+  const startListening = async () => {
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionAPI) {
       showToast("Voice input is not supported on this device");
       return;
     }
+    if (!(await requestMicrophoneAccess())) return;
     try {
       const recog = new SpeechRecognitionAPI();
       recog.lang = VOICE_LOCALE[lang] || "en-IN";
@@ -2825,6 +2901,7 @@ Sentence: "${text}"`;
                   { key: "security", icon: LockKeyhole, label: t("security"), sub: security.pinEnabled ? "PIN lock on" : "No lock set", color: "#a1690a" },
                   { key: "language", icon: Languages, label: t("language"), sub: LANGUAGES.find((l) => l.code === lang)?.label, color: "#6b4fa0" },
                   { key: "activity", icon: ScrollText, label: t("activityLog"), sub: `${activityLog.length} events logged`, color: "#334155" },
+                  { key: "reports", icon: Download, label: "Account Reports", sub: "Activity, settings and backup history", color: "#475569" },
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -2885,6 +2962,22 @@ Sentence: "${text}"`;
                     <input
                       value={profileInputs.regNo}
                       onChange={(e) => setProfileInputs((p) => ({ ...p, regNo: e.target.value }))}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none focus:border-slate-400"
+                    />
+                  </Field>
+                  <Field label="Logo / Header URL (optional)" hint="Shown in saved profile data for statement branding.">
+                    <input
+                      value={profileInputs.logoUrl}
+                      onChange={(e) => setProfileInputs((p) => ({ ...p, logoUrl: e.target.value }))}
+                      placeholder="https://... or local note"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none focus:border-slate-400"
+                    />
+                  </Field>
+                  <Field label="Authorized Signatory (optional)">
+                    <input
+                      value={profileInputs.signatureName}
+                      onChange={(e) => setProfileInputs((p) => ({ ...p, signatureName: e.target.value }))}
+                      placeholder="Name to print near signature area"
                       className="w-full border border-slate-200 rounded-lg px-3 py-3 text-base outline-none focus:border-slate-400"
                     />
                   </Field>
@@ -3051,6 +3144,25 @@ Sentence: "${text}"`;
                 </div>
 
                 <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Backup History</div>
+                  {backupHistory.length === 0 ? (
+                    <div className="text-xs text-slate-400">No backup history yet. Create a backup to record it here.</div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {backupHistory.slice(0, 5).map((entry) => (
+                        <div key={entry.id} className="rounded-lg bg-slate-50 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-slate-700">{entry.filename}</span>
+                            <span className="text-[10px] text-slate-400">{fmtDate(new Date(entry.ts).toISOString().slice(0, 10))}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">{entry.destination}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Restore from Backup</div>
                   <div className="text-xs text-slate-400 mb-3">
                     Choose a previously saved backup .json file. This replaces your current parties, transactions, and rates — you'll be asked to confirm first.
@@ -3185,6 +3297,15 @@ Sentence: "${text}"`;
                     </div>
                   )}
                 </div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mt-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Voice Permissions</div>
+                  <div className="text-xs text-slate-400 mb-3">
+                    Allows the Assistant microphone button to hear entries and commands. Android will show a microphone permission prompt if needed.
+                  </div>
+                  <button onClick={requestMicrophoneAccess} className="w-full py-2.5 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold flex items-center justify-center gap-1.5">
+                    <Mic size={16} /> Allow Microphone
+                  </button>
+                </div>
               </div>
             )}
 
@@ -3234,6 +3355,29 @@ Sentence: "${text}"`;
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {accountView === "reports" && (
+              <div>
+                <button onClick={() => setAccountView("menu")} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
+                  <ArrowLeft size={14} /> {t("back")}
+                </button>
+                <div className="text-base font-semibold text-slate-800 mb-3">Account Reports</div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Activity Export</div>
+                  <div className="text-xs text-slate-400 mb-3">Exports every app activity event with timestamp, type and message.</div>
+                  <button onClick={exportActivityLog} className="w-full py-3 rounded-xl bg-slate-100 text-slate-600 text-sm font-semibold flex items-center justify-center gap-1.5">
+                    <Download size={16} /> Export Activity CSV
+                  </button>
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Settings Summary</div>
+                  <div className="text-xs text-slate-400 mb-3">Exports business profile, backup preferences, language, security status and record counts.</div>
+                  <button onClick={exportAccountSummary} className="w-full py-3 rounded-xl text-white text-sm font-semibold flex items-center justify-center gap-1.5" style={{ background: "#215464" }}>
+                    <Download size={16} /> Export Account JSON
+                  </button>
+                </div>
               </div>
             )}
           </div>

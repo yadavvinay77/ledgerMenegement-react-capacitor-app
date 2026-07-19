@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.1
+
+- Added Business Profile fields for logo/header reference and authorized signatory.
+- Added backup history tracking and included Account preferences, activity log and backup history in backup files.
+- Added Account Reports exports for activity CSV and account/settings summary JSON.
+- Added Android microphone permission and an in-app microphone permission request before Assistant voice input starts.
+- Added a Voice Permissions control under Account Security.
+
 ## v0.4.0
 
 - Added explicit Apply and Clear buttons for dashboard and party statement date filters.
