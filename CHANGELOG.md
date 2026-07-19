@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.2
+
+- Added the missing Android audio settings permission used by Capacitor WebView microphone capture.
+- Added logo/header reference and authorized signatory text to generated statement PDF/JPG outputs.
+- Added Account Tax/GST Reports with date range, GST rate, sales/purchase summaries, estimated GST values, and CSV export.
+
 ## v0.4.1
 
 - Added Business Profile fields for logo/header reference and authorized signatory.

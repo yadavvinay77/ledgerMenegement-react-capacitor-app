@@ -334,6 +334,9 @@ export default function MilkLedger() {
   const [lang, setLang] = useState("en");
   const [autoBackup, setAutoBackup] = useState({ onEveryEntry: false, scheduled: false, scheduledTime: "20:00", lastBackupAt: null, lastAutoSnapshotAt: null });
   const [restoreError, setRestoreError] = useState("");
+  const [taxFrom, setTaxFrom] = useState(`${todayStr().slice(0, 7)}-01`);
+  const [taxTo, setTaxTo] = useState(todayStr());
+  const [taxGstRate, setTaxGstRate] = useState("5");
   const fileInputRef = useRef(null);
 
   const [chatMessages, setChatMessages] = useState([
@@ -1031,6 +1034,70 @@ export default function MilkLedger() {
     logActivity("report", "Account summary exported");
   };
 
+  const taxRows = useMemo(() => {
+    return transactions
+      .filter((txn) => txn.date >= taxFrom && txn.date <= taxTo)
+      .map((txn) => ({ ...txn, flow: customerById(txn.customerId)?.flow || "purchase", customerName: customerById(txn.customerId)?.name || "Unknown" }))
+      .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0));
+  }, [transactions, taxFrom, taxTo, customers]);
+
+  const taxSummary = useMemo(() => {
+    const gstRate = parseFloat(taxGstRate) || 0;
+    const sales = taxRows.filter((txn) => txn.flow === "sale" && txn.kind !== "money");
+    const purchases = taxRows.filter((txn) => txn.flow === "purchase" && txn.kind !== "money");
+    const saleAmount = round2(sales.reduce((sum, txn) => sum + txn.amount, 0));
+    const purchaseAmount = round2(purchases.reduce((sum, txn) => sum + txn.amount, 0));
+    const paid = round2(taxRows.filter((txn) => txn.status === "paid").reduce((sum, txn) => sum + txn.amount, 0));
+    const credit = round2(taxRows.filter((txn) => txn.status === "credit").reduce((sum, txn) => sum + txn.amount, 0));
+    const debit = round2(taxRows.filter((txn) => txn.status === "debit").reduce((sum, txn) => sum + txn.amount, 0));
+    return {
+      salesCount: sales.length,
+      purchaseCount: purchases.length,
+      saleAmount,
+      purchaseAmount,
+      estimatedOutputGst: round2(saleAmount * gstRate / 100),
+      estimatedInputGst: round2(purchaseAmount * gstRate / 100),
+      estimatedNetGst: round2((saleAmount - purchaseAmount) * gstRate / 100),
+      paid,
+      credit,
+      debit,
+    };
+  }, [taxRows, taxGstRate]);
+
+  const exportTaxReport = async () => {
+    const lines = [
+      ["Milk Ledger Tax/GST Report"].map(csvEscape).join(","),
+      ["Business", businessProfile.businessName || "Milk Ledger"].map(csvEscape).join(","),
+      ["GST/Reg No", businessProfile.regNo || ""].map(csvEscape).join(","),
+      ["Range", `${taxFrom} to ${taxTo}`].map(csvEscape).join(","),
+      ["GST Rate", `${parseFloat(taxGstRate) || 0}%`].map(csvEscape).join(","),
+      "",
+      ["Sale Amount", taxSummary.saleAmount].map(csvEscape).join(","),
+      ["Purchase Amount", taxSummary.purchaseAmount].map(csvEscape).join(","),
+      ["Estimated Output GST", taxSummary.estimatedOutputGst].map(csvEscape).join(","),
+      ["Estimated Input GST", taxSummary.estimatedInputGst].map(csvEscape).join(","),
+      ["Estimated Net GST", taxSummary.estimatedNetGst].map(csvEscape).join(","),
+      ["Paid", taxSummary.paid].map(csvEscape).join(","),
+      ["Credit", taxSummary.credit].map(csvEscape).join(","),
+      ["Debit/Udhaar", taxSummary.debit].map(csvEscape).join(","),
+      "",
+      ["Date", "Party", "Flow", "Item", "Qty", "Rate", "Amount", "Status", "Note"].map(csvEscape).join(","),
+      ...taxRows.map((txn) => [
+        txn.date,
+        txn.customerName,
+        txn.flow,
+        txn.kind === "money" ? "Money" : txn.kind === "item" ? txn.itemName : `${txn.category} ${txn.type}`,
+        txn.kind === "money" ? "" : txn.qty,
+        txn.kind === "money" ? "" : txn.rate,
+        round2(txn.amount),
+        STATUS_META[txn.status]?.label || txn.status,
+        txn.note || "",
+      ].map(csvEscape).join(",")),
+    ];
+    await shareTextFile(lines.join("\n"), `milk_ledger_tax_report_${taxFrom}_to_${taxTo}.csv`, "Milk Ledger Tax/GST Report", "text/csv;charset=utf-8;");
+    logActivity("report", "Tax/GST report exported");
+  };
+
   // ---------- Security / PIN lock ----------
   // Uses the browser's native SHA-256 (window.crypto.subtle) so the PIN
   // itself is never stored — only its hash. This is a practical local-device
@@ -1434,6 +1501,10 @@ export default function MilkLedger() {
       ctx.fillText(subtitle, pad, 52);
       ctx.font = "11px sans-serif";
       ctx.fillText(`Generated ${fmtDate(todayStr())}`, pad, 70);
+      if (businessProfile.logoUrl) {
+        ctx.font = "9px sans-serif";
+        ctx.fillText(`Logo/Header: ${businessProfile.logoUrl}`.slice(0, 70), width - pad - 250, 30);
+      }
 
       let y = headerH + 18;
       ctx.fillStyle = "#f1f5f9";
@@ -1514,6 +1585,12 @@ export default function MilkLedger() {
         }
       }
 
+      if (businessProfile.signatureName) {
+        ctx.fillStyle = "#64748b";
+        ctx.font = "8px sans-serif";
+        ctx.fillText(`Authorized Signatory: ${businessProfile.signatureName}`, tableX + tableW - 230, height - 10);
+      }
+
       canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.95);
     });
   };
@@ -1565,6 +1642,10 @@ export default function MilkLedger() {
       doc.setFontSize(10);
       doc.text(subtitle, margin, 56);
       doc.text(`Generated ${fmtDate(todayStr())}`, pageW - margin - 120, 56);
+      if (businessProfile.logoUrl) {
+        doc.setFontSize(7);
+        doc.text(doc.splitTextToSize(`Logo/Header: ${businessProfile.logoUrl}`, 180)[0], pageW - margin - 190, 72);
+      }
       doc.setDrawColor("#215464");
       doc.setLineWidth(5);
       doc.line(0, headerH, pageW, headerH);
@@ -1638,6 +1719,13 @@ export default function MilkLedger() {
       totalCells[showParty ? 11 : 10] = money(totals.debit);
       totalCells[showParty ? 12 : 11] = totals.balance != null ? `Balance ${money(totals.balance)}` : "";
       totalCells.forEach((value, i) => cell(value, i, y, { bold: true, color: "#0f172a" }));
+      if (businessProfile.signatureName) {
+        y = ensureRoom(y + rowH);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor("#64748b");
+        doc.text(`Authorized Signatory: ${businessProfile.signatureName}`, pageW - margin - 190, y);
+      }
     }
 
     return doc.output("blob");
@@ -1890,6 +1978,7 @@ export default function MilkLedger() {
       text(businessProfile.address || "Business address not set", margin, 71, { size: 9, color: "#dbe4ee" });
       text("LOAN STATEMENT", pageW - margin - 180, 36, { bold: true, size: 18, color: "#ffffff" });
       text(`Generated: ${fmtDate(todayStr())}`, pageW - margin - 140, 60, { size: 10, color: "#dbe4ee" });
+      if (businessProfile.logoUrl) text(`Logo/Header: ${businessProfile.logoUrl}`.slice(0, 70), pageW - margin - 210, 76, { size: 7, color: "#dbe4ee" });
       doc.setDrawColor("#215464");
       doc.setLineWidth(5);
       doc.line(0, 90, pageW, 90);
@@ -1958,6 +2047,14 @@ export default function MilkLedger() {
       });
       y += 22;
     });
+    if (businessProfile.signatureName) {
+      if (y > pageH - 44) {
+        doc.addPage();
+        drawHeader();
+        y = 124;
+      }
+      text(`Authorized Signatory: ${businessProfile.signatureName}`, pageW - margin - 190, y + 18, { size: 8, color: "#64748b" });
+    }
     await shareBlobAsFile(doc.output("blob"), `${loanStatementName(loan)}.pdf`, "Loan Statement PDF");
   };
 
@@ -1989,6 +2086,7 @@ export default function MilkLedger() {
     cell(businessProfile.businessName || "Milk Ledger", 48, 48, 480, { bold: true, size: 34, color: "#ffffff" });
     cell("Loan account statement", 48, 80, 420, { size: 18, color: "#dbe4ee" });
     cell(`Generated: ${fmtDate(todayStr())}`, 930, 80, 260, { size: 18, color: "#dbe4ee" });
+    if (businessProfile.logoUrl) cell(`Logo/Header: ${businessProfile.logoUrl}`, 930, 106, 280, { size: 12, color: "#dbe4ee" });
     ctx.fillStyle = "#215464";
     ctx.fillRect(0, 128, width, 8);
 
@@ -2038,6 +2136,7 @@ export default function MilkLedger() {
       columns.forEach(([, x, w], i) => cell(values[i], x, y, w, { bold: i === 2 || i === 3, size: 15, color: i === 3 ? "#0f172a" : "#334155" }));
       y += rowH;
     });
+    if (businessProfile.signatureName) cell(`Authorized Signatory: ${businessProfile.signatureName}`, 930, Math.min(height - 24, y + 26), 280, { size: 14, color: "#64748b" });
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.95));
     await shareBlobAsFile(blob, `${loanStatementName(loan)}.jpg`, "Loan Statement Image");
   };
@@ -2902,6 +3001,7 @@ Sentence: "${text}"`;
                   { key: "language", icon: Languages, label: t("language"), sub: LANGUAGES.find((l) => l.code === lang)?.label, color: "#6b4fa0" },
                   { key: "activity", icon: ScrollText, label: t("activityLog"), sub: `${activityLog.length} events logged`, color: "#334155" },
                   { key: "reports", icon: Download, label: "Account Reports", sub: "Activity, settings and backup history", color: "#475569" },
+                  { key: "tax", icon: Receipt, label: "Tax / GST Reports", sub: "Date-range sales, purchase and GST summary", color: "#1b7a5e" },
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -3378,6 +3478,51 @@ Sentence: "${text}"`;
                     <Download size={16} /> Export Account JSON
                   </button>
                 </div>
+              </div>
+            )}
+
+            {accountView === "tax" && (
+              <div>
+                <button onClick={() => setAccountView("menu")} className="flex items-center gap-1.5 text-sm text-slate-500 mb-3">
+                  <ArrowLeft size={14} /> {t("back")}
+                </button>
+                <div className="text-base font-semibold text-slate-800 mb-3">Tax / GST Reports</div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <Field label="From">
+                      <input type="date" value={taxFrom} onChange={(e) => setTaxFrom(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base outline-none" />
+                    </Field>
+                    <Field label="To">
+                      <input type="date" value={taxTo} onChange={(e) => setTaxTo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base outline-none" />
+                    </Field>
+                  </div>
+                  <Field label="GST Rate %">
+                    <input type="number" inputMode="decimal" value={taxGstRate} onChange={(e) => setTaxGstRate(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base outline-none" />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <StatCard label="Sale Amount" value={`Rs ${taxSummary.saleAmount}`} sub={`${taxSummary.salesCount} sale rows`} accent={FLOW_META.sale.color} />
+                  <StatCard label="Purchase Amount" value={`Rs ${taxSummary.purchaseAmount}`} sub={`${taxSummary.purchaseCount} purchase rows`} accent={FLOW_META.purchase.color} />
+                  <StatCard label="Output GST" value={`Rs ${taxSummary.estimatedOutputGst}`} sub="Estimated on sales" accent="#a1690a" />
+                  <StatCard label="Input GST" value={`Rs ${taxSummary.estimatedInputGst}`} sub="Estimated on purchases" accent="#1b7a5e" />
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-slate-500">Estimated Net GST</span>
+                    <span className={`text-lg font-bold ${taxSummary.estimatedNetGst >= 0 ? "text-[#b3391f]" : "text-[#1b7a5e]"}`}>Rs {taxSummary.estimatedNetGst}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-lg bg-slate-50 py-2"><div className="text-[10px] text-slate-400">Paid</div><div className="text-xs font-bold">Rs {taxSummary.paid}</div></div>
+                    <div className="rounded-lg bg-slate-50 py-2"><div className="text-[10px] text-slate-400">Credit</div><div className="text-xs font-bold">Rs {taxSummary.credit}</div></div>
+                    <div className="rounded-lg bg-slate-50 py-2"><div className="text-[10px] text-slate-400">Debit</div><div className="text-xs font-bold">Rs {taxSummary.debit}</div></div>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-3">
+                    This is a ledger summary for GST/ITR preparation. Please verify rates, exemptions and filing treatment with your accountant.
+                  </div>
+                </div>
+                <button onClick={exportTaxReport} className="w-full py-3 rounded-xl text-white text-sm font-semibold flex items-center justify-center gap-1.5" style={{ background: "#215464" }}>
+                  <Download size={16} /> Export Tax/GST CSV
+                </button>
               </div>
             )}
           </div>
